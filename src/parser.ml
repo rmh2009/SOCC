@@ -75,6 +75,6 @@ let get_ast tokens =
   program
 
 let _ =
-  let ast = get_ast (Lexer.parse_tokens (Lexer.read_file_content "test_file"))
+  let ast = get_ast (Lexer.parse_tokens (Lexer.read_file_content "test.cc"))
   in
   Printf.printf "\nParsed AST: \n%s" (print_ast ast)

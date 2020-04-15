@@ -91,7 +91,7 @@ let parse_tokens content =
   List.rev (parse_tokens_acc [] content 0)
 
 let _ = 
-  Printf.printf "%s" (read_file_content "test_file");
-  let tokens = parse_tokens (read_file_content "test_file") in
+  Printf.printf "%s" (read_file_content "test.cc");
+  let tokens = parse_tokens (read_file_content "test.cc") in
   List.iter (fun a -> Printf.printf "%s\n" (print_token a)) tokens
 

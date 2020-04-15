@@ -1,16 +1,3 @@
-
-let read_file_content file_name =
-  let file = open_in file_name in
-  let buf = Buffer.create (in_channel_length file) in
-  try
-    while true do
-      let line = input_line file in
-      Buffer.add_string buf line;
-      Buffer.add_char buf '\n';
-    done; assert false
-  with End_of_file ->
-    Buffer.contents buf
-
 type token_t = 
   MainKeyword 
   | IntKeyword 
@@ -23,6 +10,18 @@ type token_t =
   | IntegerLiteral of string 
   | Semicolon 
   | EndOfFile
+
+let read_file_content file_name =
+  let file = open_in file_name in
+  let buf = Buffer.create (in_channel_length file) in
+  try
+    while true do
+      let line = input_line file in
+      Buffer.add_string buf line;
+      Buffer.add_char buf '\n';
+    done; assert false
+  with End_of_file ->
+    Buffer.contents buf
 
 let print_token token =
   match token with
@@ -73,10 +72,10 @@ let parse_tokens content =
     if i >= String.length content then (EndOfFile, i)
     else
       match String.get content i with
-    | '{' -> LeftParentheses, i+1
-    | '}' -> RightParentheses, i+1
-    | '(' -> LeftBrace, i+1
-    | ')' -> RightBrace, i+1
+    | '{' -> LeftBrace, i+1
+    | '}' -> RightBrace, i+1
+    | '(' -> LeftParentheses, i+1
+    | ')' -> RightParentheses, i+1
     | ';' -> Semicolon, i+1
     | ' ' -> parse_one_token content (i+1)
     | '\n' -> parse_one_token content (i+1)
@@ -89,11 +88,10 @@ let parse_tokens content =
     if (new_i < String.length content) then parse_tokens_acc (token :: tokens) content new_i
     else tokens
     in
-  parse_tokens_acc [] content 0
+  List.rev (parse_tokens_acc [] content 0)
 
 let _ = 
   Printf.printf "%s" (read_file_content "test_file");
   let tokens = parse_tokens (read_file_content "test_file") in
   List.iter (fun a -> Printf.printf "%s\n" (print_token a)) tokens
-
 

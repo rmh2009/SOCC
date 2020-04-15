@@ -37,30 +37,30 @@ let fail message =
 let parse_expression tokens =
   match tokens with
   | [] -> fail "Empty expression."
-  | Lexer.IntegerLiteral a :: r -> ConstantIntExp (int_of_string a), r
-  | a :: r -> fail ("Invalid token in parse_expression: " ^ (Lexer.print_token a))
+  | IntegerLiteral a :: r -> ConstantIntExp (int_of_string a), r
+  | a :: r -> fail ("Invalid token in parse_expression: " ^ (print_token a))
 
 (* Parses tokens to get a statement, returns the statement and the remaining tokens. *)
 let parse_statement tokens =
   match tokens with
   | [] -> fail "Empty statement."
-  | Lexer.ReturnKeyword :: r ->
+  | ReturnKeyword :: r ->
       let expression, left_tokens = parse_expression r in
       ( match left_tokens with
-      | Lexer.Semicolon :: r -> ReturnStatement expression, r
+      | Semicolon :: r -> ReturnStatement expression, r
       | _ -> fail "Expecting semicolon." )
-  | a :: r -> fail ("Unrecognized token in parse_statement: " ^ (Lexer.print_token a))
+  | a :: r -> fail ("Unrecognized token in parse_statement: " ^ (print_token a))
 
 (* Parses tokens to get a function, returns the function and the remaining tokens. *)
 let parse_function tokens =
   match tokens with
   | [] -> fail "Empty function."
-  | Lexer.IntKeyword :: Lexer.MainKeyword :: Lexer.LeftParentheses :: Lexer.RightParentheses:: Lexer.LeftBrace :: r ->
+  | IntKeyword :: MainKeyword :: LeftParentheses :: RightParentheses:: LeftBrace :: r ->
       let statement, left_tokens = parse_statement r in
       ( match left_tokens with
-      | Lexer.RightBrace :: r -> IntFunction statement, r
+      | RightBrace :: r -> IntFunction statement, r
       | _ -> fail "Expecting right brace in parse_function." )
-  | a :: r -> fail ("Unrecognized token in parse_function: " ^ (Lexer.print_token a))
+  | a :: r -> fail ("Unrecognized token in parse_function: " ^ (print_token a))
 
 (* Parses tokens to get a program, returns the program and possibly remaining tokens. *)
 let parse_program tokens =
@@ -75,6 +75,6 @@ let get_ast tokens =
   program
 
 let _ =
-  let ast = get_ast (Lexer.parse_tokens (Lexer.read_file_content "test.cc"))
+  let ast = get_ast (parse_tokens (read_file_content "test.cc"))
   in
   Printf.printf "\nParsed AST: \n%s" (print_ast ast)

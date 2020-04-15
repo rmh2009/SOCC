@@ -23,7 +23,7 @@ let generate_assembly ast =
 
 
 let _ =
-  let ast = get_ast (Lexer.parse_tokens (Lexer.read_file_content "test.cc"))
+  let ast = get_ast (parse_tokens (read_file_content "test.cc"))
   in
   Printf.printf "\nParsed AST: \n%s" (print_ast ast);
   let code = generate_assembly ast

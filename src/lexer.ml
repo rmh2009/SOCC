@@ -9,6 +9,9 @@ type token_t =
   | Identifier of string 
   | IntegerLiteral of string 
   | Semicolon 
+  | Negation
+  | LogicalNegation
+  | BitComplement
   | EndOfFile
 
 let read_file_content file_name =
@@ -35,6 +38,9 @@ let print_token token =
   | Identifier a -> "Identifier: " ^ a
   | IntegerLiteral a -> "IntegerLiteral: " ^ a
   | Semicolon -> "Semicolon"
+  | Negation -> "Negation -"
+  | LogicalNegation -> "LogicalNegation !"
+  | BitComplement -> "BitComplement ~"
   | EndOfFile -> "EndOfFile"
 
 exception LexerError of string
@@ -77,6 +83,9 @@ let parse_tokens content =
     | '(' -> LeftParentheses, i+1
     | ')' -> RightParentheses, i+1
     | ';' -> Semicolon, i+1
+    | '-' -> Negation, i+1
+    | '!' -> LogicalNegation, i+1
+    | '~' -> BitComplement, i+1
     | ' ' -> parse_one_token content (i+1)
     | '\n' -> parse_one_token content (i+1)
     | a -> 

@@ -2,6 +2,9 @@ open Lexer
 
 type expression_t =
   ConstantIntExp of int
+  | NegateOp of expression_t
+  | LogicalNegateOp of expression_t
+  | ComplementOp of expression_t
 
 type statement_t =
   ReturnStatement of expression_t
@@ -13,9 +16,12 @@ type program_t =
   Program of function_t
 
 let print_ast ast =
-  let print_expression spaces exp =
+  let rec print_expression spaces exp =
     match exp with
     | ConstantIntExp n -> (String.make spaces ' ') ^ "IntegerExpression: " ^ (string_of_int n) ^ "\n"
+    | NegateOp exp -> (String.make spaces ' ') ^ "NegateOp:\n" ^ (print_expression (spaces + 1) exp)
+    | LogicalNegateOp exp -> (String.make spaces ' ') ^ "LogicalNegateOp:\n" ^ (print_expression (spaces + 1) exp)
+    | ComplementOp exp -> (String.make spaces ' ') ^ "ComplementOp:\n" ^ (print_expression (spaces + 1) exp)
   in
   let print_statement spaces st =
     match st with
@@ -34,10 +40,19 @@ let fail message =
   raise (TokenError message)
 
 (* Parses tokens to get an expression, returns the expression and the remaining tokens. *)
-let parse_expression tokens =
+let rec parse_expression tokens =
   match tokens with
   | [] -> fail "Empty expression."
   | IntegerLiteral a :: r -> ConstantIntExp (int_of_string a), r
+  | Negation :: r ->
+      (let exp, left = parse_expression r in
+      NegateOp exp, left)
+  | LogicalNegation :: r ->
+      (let exp, left = parse_expression r in
+      LogicalNegateOp exp, left)
+  | BitComplement :: r ->
+      (let exp, left = parse_expression r in
+      ComplementOp exp, left)
   | a :: r -> fail ("Invalid token in parse_expression: " ^ (print_token a))
 
 (* Parses tokens to get a statement, returns the statement and the remaining tokens. *)

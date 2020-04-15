@@ -4,11 +4,24 @@ open Parser
 (* Generates the assembly code as a string given the ast in Parser.program_t type. *)
 let generate_assembly ast =
   let buf = Buffer.create 32 in
+  let rec generate_expression exp =
+    match exp with
+        | ConstantIntExp n -> Buffer.add_string buf ("movl    $" ^ (string_of_int n) ^ ", %eax\n" )
+        | NegateOp exp ->
+            generate_expression exp;
+            Buffer.add_string buf "neg    %eax\n"
+        | LogicalNegateOp exp ->
+            generate_expression exp;
+            Buffer.add_string buf "cmpl    $0, %eax\nmovl     $0, %eax\nsete    %al\n"
+        | ComplementOp exp ->
+            generate_expression exp;
+            Buffer.add_string buf "not    %eax\n"
+  in
   let generate_statement st =
     match st with
     | ReturnStatement exp ->
-        (match exp with
-        | ConstantIntExp n -> Buffer.add_string buf ("movl    $" ^ (string_of_int n) ^ ", %eax\nret\n" ))
+        generate_expression exp;
+        Buffer.add_string buf "ret\n"
   in
   let generate_function f =
     match f with

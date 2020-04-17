@@ -9,9 +9,12 @@ type token_t =
   | Identifier of string 
   | IntegerLiteral of string 
   | Semicolon 
-  | Negation
-  | LogicalNegation
+  | Negation (* this is also Minus *)
+  | LogicalNegation (* this is the ! sign *)
   | BitComplement
+  | Addition
+  | Multiplication
+  | Division 
   | EndOfFile
 
 let read_file_content file_name =
@@ -41,6 +44,9 @@ let print_token token =
   | Negation -> "Negation -"
   | LogicalNegation -> "LogicalNegation !"
   | BitComplement -> "BitComplement ~"
+  | Addition -> "Addition"
+  | Multiplication -> "Multiplication"
+  | Division -> "Division" 
   | EndOfFile -> "EndOfFile"
 
 exception LexerError of string
@@ -86,6 +92,9 @@ let parse_tokens content =
     | '-' -> Negation, i+1
     | '!' -> LogicalNegation, i+1
     | '~' -> BitComplement, i+1
+    | '+' -> Addition, i+1
+    | '*' -> Multiplication, i+1
+    | '/' -> Division, i+1
     | ' ' -> parse_one_token content (i+1)
     | '\n' -> parse_one_token content (i+1)
     | a -> 

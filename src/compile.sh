@@ -21,7 +21,7 @@ fi
 if [ $MODE == "run" ]; then
   # Compile the generated assembly into executable and run.
   # Use the brew installed gcc since the default gcc in macos no longer supports 32bit.
-  /usr/local/Cellar/gcc/9.3.0/bin/gcc-9 -m32 assembly.s -o out
+  gcc -v -arch i386 assembly.s -o out
   if [ $? -ne 0 ]; then
     exit 1
   fi

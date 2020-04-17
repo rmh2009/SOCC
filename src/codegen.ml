@@ -16,6 +16,33 @@ let generate_assembly ast =
         | ComplementOp exp ->
             generate_expression exp;
             Buffer.add_string buf "not    %eax\n"
+        | GroupedExpression exp ->
+            generate_expression exp
+        | AdditionExp (exp1, exp2) ->
+            generate_expression exp1;
+            Buffer.add_string buf "push    %eax\n";
+            generate_expression exp2;
+            Buffer.add_string buf "pop    %ecx\n";
+            Buffer.add_string buf "addl    %ecx, %eax\n"
+        | MinusExp (exp1, exp2) ->
+            generate_expression exp2;
+            Buffer.add_string buf "push    %eax\n";
+            generate_expression exp1;
+            Buffer.add_string buf "pop    %ecx\n";
+            Buffer.add_string buf "subl    %ecx, %eax\n"
+        | MultiExp (exp1, exp2) ->
+            generate_expression exp1;
+            Buffer.add_string buf "push    %eax\n";
+            generate_expression exp2;
+            Buffer.add_string buf "pop    %ecx\n";
+            Buffer.add_string buf "imul    %ecx, %eax\n"
+        | DivideExp (exp1, exp2) ->
+            generate_expression exp2;
+            Buffer.add_string buf "push    %eax\n";
+            generate_expression exp1;
+            Buffer.add_string buf "cdq\n";
+            Buffer.add_string buf "pop    %ecx\n";
+            Buffer.add_string buf "idvl    %ecx\n"
   in
   let generate_statement st =
     match st with

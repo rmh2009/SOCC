@@ -8,8 +8,8 @@ if [ -z $MODE ]; then
 fi
 
 if [ $MODE == "compile" ]; then
-  # Compile the compiler, then compile the test.cc file into assembly.s.
-  ocamlopt -o cc_ocaml lexer.ml parser.ml codegen.ml
+  # Compile the compiler, then use it to compile the test.cc file into assembly.s.
+  ocamlopt -o cc_ocaml lexer.ml parser.ml util.ml codegen.ml
   ret=$?
   if [[ $ret -ne 0 ]]; then
     echo "Comiling failed."
@@ -25,7 +25,6 @@ if [ $MODE == "run" ]; then
   if [ $? -ne 0 ]; then
     exit 1
   fi
-  ./cc_ocaml
   ./out
   echo "output is $?!"
 fi

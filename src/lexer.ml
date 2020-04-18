@@ -16,6 +16,15 @@ type token_t =
   | Multiplication
   | Division 
   | EndOfFile
+  | And
+  | Or
+  | Equal
+  | NotEqual
+  | Less
+  | LessOrEqual
+  | Greater
+  | GreaterOrEqual
+
 
 let read_file_content file_name =
   let file = open_in file_name in
@@ -48,6 +57,14 @@ let print_token token =
   | Multiplication -> "Multiplication"
   | Division -> "Division" 
   | EndOfFile -> "EndOfFile"
+  | And -> "And"
+  | Or -> "Or"
+  | Equal -> "Equal"
+  | NotEqual -> "NotEqual"
+  | Less -> "Less"
+  | LessOrEqual -> "LessOrEqual"
+  | Greater -> "Greater"
+  | GreaterOrEqual -> "GreaterOrEqual"
 
 exception LexerError of string
 
@@ -90,11 +107,28 @@ let parse_tokens content =
     | ')' -> RightParentheses, i+1
     | ';' -> Semicolon, i+1
     | '-' -> Negation, i+1
-    | '!' -> LogicalNegation, i+1
+    | '!' ->
+        if (String.get content (i+1)) = '=' then NotEqual, i+2
+        else LogicalNegation, i+1 
     | '~' -> BitComplement, i+1
     | '+' -> Addition, i+1
     | '*' -> Multiplication, i+1
     | '/' -> Division, i+1
+    | '&' ->
+        if (String.get content (i+1)) = '&' then And, i+2
+        else raise (LexerError "Expeting another & sign.")
+    | '|' ->
+        if (String.get content (i+1)) = '|' then Or, i+2
+        else raise (LexerError "Expeting another | sign.")
+    | '=' ->
+        if (String.get content (i+1)) = '=' then Equal, i+2
+        else raise (LexerError "Expeting another = sign.")
+    | '>' ->
+        if (String.get content (i+1)) = '=' then GreaterOrEqual, i+2
+        else Greater, i+1
+    | '<' ->
+        if (String.get content (i+1)) = '=' then LessOrEqual, i+2
+        else Less, i+1
     | ' ' -> parse_one_token content (i+1)
     | '\n' -> parse_one_token content (i+1)
     | a -> 

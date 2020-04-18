@@ -6,6 +6,7 @@ open Lexer
  * Expression is multiple terms connected by + or - signs. *)
 type expression_t =
   ConstantIntExp of int
+  | VarExp of string
   | GroupedExpression of expression_t
   | NegateOp of expression_t
   | LogicalNegateOp of expression_t
@@ -22,12 +23,15 @@ type expression_t =
   | NotEqualExp of expression_t * expression_t 
   | OrExp of expression_t * expression_t 
   | AndExp of expression_t * expression_t 
+  | AssignExp of string * expression_t
 
 type statement_t =
   ReturnStatement of expression_t
+  | DeclareStatement of string * expression_t option
+  | ExpressionStatement of expression_t
 
 type function_t =
-  IntFunction of statement_t
+  IntFunction of string * statement_t list
 
 type program_t =
   Program of function_t
@@ -38,6 +42,7 @@ let print_ast ast =
       (String.make spaces ' ') ^ op ^ " of \n" ^ (print_expression (spaces+1) exp1) ^ (print_expression (spaces+1) exp2)
     in
     match exp with
+    | VarExp (a) -> (String.make spaces ' ') ^ "Ref of " ^ a ^ "\n"
     | ConstantIntExp n -> (String.make spaces ' ') ^ "IntegerExpression: " ^ (string_of_int n) ^ "\n"
     | NegateOp exp -> (String.make spaces ' ') ^ "NegateOp:\n" ^ (print_expression (spaces + 1) exp)
     | LogicalNegateOp exp -> (String.make spaces ' ') ^ "LogicalNegateOp:\n" ^ (print_expression (spaces + 1) exp)
@@ -55,14 +60,21 @@ let print_ast ast =
     | NotEqualExp (exp1, exp2)  -> print_binary spaces "NotEqual" exp1 exp2
     | OrExp (exp1, exp2)  -> print_binary spaces "LogicalOr" exp1 exp2
     | AndExp (exp1, exp2)  -> print_binary spaces "LogicalAnd" exp1 exp2
+    | AssignExp (a, st) -> (String.make spaces ' ') ^ "Assignment of " ^ a ^ ":\n" ^ (print_expression (spaces+1) st)
   in
   let print_statement spaces st =
     match st with
     | ReturnStatement exp -> (String.make spaces ' ') ^ "Return Statement: \n" ^ (print_expression (spaces+1) exp)
+    | DeclareStatement (a, None) -> (String.make spaces ' ') ^ "Declare Statement of " ^ a ^ "\n" ;
+    | DeclareStatement (a, Some exp) -> (String.make spaces ' ') ^ "Declare and Init Statement of " ^ a ^ ":\n" ^ (print_expression (spaces+1) exp)
+    | ExpressionStatement exp -> (String.make spaces ' ') ^ "Expression Statement: \n" ^ (print_expression (spaces+1) exp)
   in
   let print_function spaces f =
+    let print_statements spaces statements=
+      List.fold_left (fun acc st -> acc ^ (print_statement spaces st)) "" statements
+    in
     match f with
-    | IntFunction st -> (String.make spaces ' ') ^ "Function: \n" ^ (print_statement (spaces+1) st)
+    | IntFunction (a, sts) -> (String.make spaces ' ') ^ "Function " ^ a ^ ": \n" ^ (print_statements (spaces+1) sts)
   in
   match ast with
   | Program f -> "Program: \n" ^ (print_function 1 f)
@@ -77,6 +89,7 @@ let rec parse_factor tokens =
   match tokens with
   | [] -> fail "Empty expression."
   | IntegerLiteral a :: r -> ConstantIntExp (int_of_string a), r
+  | Identifier (a) :: r -> VarExp (a), r
   | Negation :: r ->
       (let exp, left = parse_factor r in
       NegateOp exp, left)
@@ -91,7 +104,7 @@ let rec parse_factor tokens =
       match left with
       | RightParentheses :: r -> GroupedExpression exp, r
       | _ -> fail "Expecting RightParentheses.")
-  | a :: r -> fail ("Unexpected token: " ^ (print_token a))
+  | a :: r -> fail ("Unexpected token in parse_factor: " ^ (print_token a))
 
 and parse_term tokens =
   (* Parses a term. *)
@@ -186,33 +199,56 @@ and parse_logical_or_expression tokens =
 
 and parse_expression tokens =
   (* Parses an expression. *)
-  parse_logical_or_expression tokens
+  match tokens with
+  | Identifier (a) :: Assignment :: r ->
+      let exp, left = parse_expression r in
+      AssignExp (a, exp), left
+  | l -> parse_logical_or_expression l
 
 (* Parses tokens to get a statement, returns the statement and the remaining tokens. *)
 let parse_statement tokens =
           match tokens with
   | [] -> fail "Empty statement."
   | ReturnKeyword :: r ->
-      let expression, left_tokens = parse_expression r in
-      ( match left_tokens with
-      | Semicolon :: r -> ReturnStatement expression, r
+      let expression, left = parse_expression r in
+      ( match left with
+      | Semicolon :: tl -> ReturnStatement expression, tl
       | _ -> fail "Expecting semicolon." )
-      | a :: r -> fail ("Unrecognized token in parse_statement: " ^ (print_token a))
+  | IntKeyword :: Identifier (a) :: Assignment :: r ->
+      let exp, left = parse_expression r in
+      ( match left with
+      | Semicolon :: tl -> DeclareStatement (a, Some exp), tl
+      | _ -> fail "Expecting semicolon." )
+  | IntKeyword :: Identifier (a) :: Semicolon :: r ->
+      DeclareStatement(a, None), r
+  | l -> 
+      let exp, left = parse_expression l in
+      ( match left with
+      | Semicolon :: tl -> ExpressionStatement (exp), tl
+      | _ -> fail "Expecting semicolon." )
 
-      (* Parses tokens to get a function, returns the function and the remaining tokens. *)
-        let parse_function tokens =
-          match tokens with
+(* Parses tokens to get a function, returns the function and the remaining tokens. *)
+let parse_function tokens =
+  let rec parse_statements acc tokens =
+    match tokens with 
+      | RightBrace :: r -> (List.rev acc), r
+      | l -> let statement, left = parse_statement tokens 
+      in
+      parse_statements (statement :: acc) left
+      in
+  match tokens with
   | [] -> fail "Empty function."
   | IntKeyword :: MainKeyword :: LeftParentheses :: RightParentheses:: LeftBrace :: r ->
-      let statement, left_tokens = parse_statement r in
-      ( match left_tokens with
-      | RightBrace :: r -> IntFunction statement, r
-      | _ -> fail "Expecting right brace in parse_function." )
-      | a :: r -> fail ("Unrecognized token in parse_function: " ^ (print_token a))
+      let statements, left = parse_statements [] r in
+      IntFunction ("main", statements), left
+  | IntKeyword :: Identifier (a) :: LeftParentheses :: RightParentheses:: LeftBrace :: r ->
+      let statements, left = parse_statements [] r in
+      IntFunction (a, statements), left
+  | a :: r -> fail ("Unexpected token in parse_function: " ^ (print_token a))
 
-      (* Parses tokens to get a program, returns the program and possibly remaining tokens. *)
-        let parse_program tokens =
-          match tokens with
+(* Parses tokens to get a program, returns the program and possibly remaining tokens. *)
+let parse_program tokens =
+  match tokens with
   | [] -> fail "Empty program."
   | a -> let func, r = parse_function a in
   Program func, r
@@ -225,4 +261,5 @@ let get_ast tokens =
 let _ =
   let ast = get_ast (parse_tokens (read_file_content "test.cc"))
   in
+  print_endline "Parse ast complete.";
   Printf.printf "\nParsed AST: \n%s" (print_ast ast)

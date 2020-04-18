@@ -24,6 +24,7 @@ type token_t =
   | LessOrEqual
   | Greater
   | GreaterOrEqual
+  | Assignment
 
 
 let read_file_content file_name =
@@ -65,6 +66,7 @@ let print_token token =
   | LessOrEqual -> "LessOrEqual"
   | Greater -> "Greater"
   | GreaterOrEqual -> "GreaterOrEqual"
+  | Assignment -> "Assignment"
 
 exception LexerError of string
 
@@ -122,7 +124,7 @@ let parse_tokens content =
         else raise (LexerError "Expeting another | sign.")
     | '=' ->
         if (String.get content (i+1)) = '=' then Equal, i+2
-        else raise (LexerError "Expeting another = sign.")
+        else Assignment, i+1
     | '>' ->
         if (String.get content (i+1)) = '=' then GreaterOrEqual, i+2
         else Greater, i+1
@@ -133,7 +135,7 @@ let parse_tokens content =
     | '\n' -> parse_one_token content (i+1)
     | a -> 
         if (is_alphanumeric a) then parse_keyword_identifier_literal content i
-        else raise (LexerError "Illegal character.")
+        else raise (LexerError ("Illegal character: " ^ (String.make 1 a)))
   in
   let rec parse_tokens_acc tokens content i =
     let token, new_i = parse_one_token content i in

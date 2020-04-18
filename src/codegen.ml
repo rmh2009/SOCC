@@ -2,55 +2,66 @@ open Lexer
 open Parser
 open Util
 
+module VarMap = Map.Make(String)
+
+exception CodeGenError of string
+
+type var_map_t = { vars: int VarMap.t ; index : int}
+
 (* Generates the assembly code as a string given the ast in Parser.program_t type. *)
 let generate_assembly ast =
   let buf = Buffer.create 32 in
   let count = ref 0 in
-  let rec generate_expression exp =
+  let rec generate_expression var_map exp =
     let generate_relational_expression buf command exp1 exp2=
-      generate_expression exp1;
+      generate_expression var_map exp1;
       Buffer.add_string buf "push    %eax\n";
-      generate_expression exp2;
+      generate_expression var_map exp2;
       Buffer.add_string buf "pop    %ecx\n";
       Buffer.add_string buf "cmpl   %eax, %ecx\n";
       Buffer.add_string buf "movl   $0, %eax\n";
       Buffer.add_string buf (command ^ "   %al\n")
     in
     match exp with
+        | VarExp a ->
+            (match VarMap.find_opt a var_map.vars with
+            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | Some offset ->
+                Buffer.add_string buf ("movl  " ^ (string_of_int offset) ^ "(%ebp),  %eax\n"))
         | ConstantIntExp n -> Buffer.add_string buf ("movl    $" ^ (string_of_int n) ^ ", %eax\n" )
         | NegateOp exp ->
-            generate_expression exp;
+            generate_expression var_map exp;
             Buffer.add_string buf "neg    %eax\n"
         | LogicalNegateOp exp ->
-            generate_expression exp;
+            generate_expression var_map exp;
             Buffer.add_string buf "cmpl    $0, %eax\nmovl     $0, %eax\nsete    %al\n"
         | ComplementOp exp ->
-            generate_expression exp;
+            generate_expression var_map exp;
             Buffer.add_string buf "not    %eax\n"
         | GroupedExpression exp ->
-            generate_expression exp
+            generate_expression var_map exp
         | AdditionExp (exp1, exp2) ->
-            generate_expression exp1;
+            generate_expression var_map exp1;
             Buffer.add_string buf "push    %eax\n";
-            generate_expression exp2;
+            generate_expression var_map exp2;
             Buffer.add_string buf "pop    %ecx\n";
             Buffer.add_string buf "addl    %ecx, %eax\n"
         | MinusExp (exp1, exp2) ->
-            generate_expression exp2;
+            generate_expression var_map exp2;
             Buffer.add_string buf "push    %eax\n";
-            generate_expression exp1;
+            generate_expression var_map exp1;
             Buffer.add_string buf "pop    %ecx\n";
             Buffer.add_string buf "subl    %ecx, %eax\n"
         | MultiExp (exp1, exp2) ->
-            generate_expression exp1;
+            generate_expression var_map exp1;
             Buffer.add_string buf "push    %eax\n";
-            generate_expression exp2;
+            generate_expression var_map exp2;
             Buffer.add_string buf "pop    %ecx\n";
             Buffer.add_string buf "imul    %ecx, %eax\n"
         | DivideExp (exp1, exp2) ->
-            generate_expression exp2;
+            generate_expression var_map exp2;
             Buffer.add_string buf "push    %eax\n";
-            generate_expression exp1;
+            generate_expression var_map exp1;
             Buffer.add_string buf "cdq\n";
             Buffer.add_string buf "pop    %ecx\n";
             Buffer.add_string buf "idvl    %ecx\n"
@@ -67,38 +78,70 @@ let generate_assembly ast =
         | LessExp (exp1, exp2) ->
             generate_relational_expression buf "setl" exp1 exp2
         | OrExp (exp1, exp2) ->
-            generate_expression exp1;
+            generate_expression var_map exp1;
             let clause_label = get_unique_label "_clause2" count in
             let end_label = get_unique_label "_end" count in
             Buffer.add_string buf ("cmpl    $0, %eax\nje " ^ clause_label ^ "\n");
             Buffer.add_string buf ("movl    $1, %eax\njmp " ^ end_label ^ "\n");
             Buffer.add_string buf (clause_label ^ ":\n");
-            generate_expression exp2;
+            generate_expression var_map exp2;
             Buffer.add_string buf ("cmpl    $0, %eax\nmovl    $0, %eax\nsetne    %al\n");
             Buffer.add_string buf (end_label ^ ":\n")
         | AndExp (exp1, exp2) ->
-            generate_expression exp1;
+            generate_expression var_map exp1;
             let clause_label = get_unique_label "_clause2" count in
             let end_label = get_unique_label "_end" count in
             Buffer.add_string buf ("cmpl    $0, %eax\njne " ^ clause_label ^ "\n");
             Buffer.add_string buf ("movl    $0, %eax\njmp " ^ end_label ^ "\n");
             Buffer.add_string buf (clause_label ^ ":\n");
-            generate_expression exp2;
+            generate_expression var_map exp2;
             Buffer.add_string buf ("cmpl    $0, %eax\nmovl    $0, %eax\nsetne    %al\n");
             Buffer.add_string buf (end_label ^ ":\n")
+        | AssignExp (a, exp) ->
+            (match VarMap.find_opt a var_map.vars with
+            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | Some offset -> 
+                Buffer.add_string buf ("movl  %eax, " ^ (string_of_int offset) ^ "(%ebp)\n"))
+
   in
-  let generate_statement st =
+  let generate_statement var_map st =
     match st with
     | ReturnStatement exp ->
-        generate_expression exp;
-        Buffer.add_string buf "ret\n"
+        generate_expression var_map exp;
+        Buffer.add_string buf "movl    %ebp, %esp\npop    %ebp\n";
+        Buffer.add_string buf "ret\n";
+        var_map
+    | ExpressionStatement (exp) ->
+        generate_expression var_map exp;
+        var_map
+    | DeclareStatement (a, exp_opt) ->
+        (match exp_opt with
+        | None ->
+            Buffer.add_string buf "movl    $0, %eax\n"
+        | Some exp ->
+            generate_expression var_map exp);
+        Buffer.add_string buf "push    %eax\n";
+        (match (VarMap.find_opt a var_map.vars) with
+        | Some x -> raise (CodeGenError ("Var " ^ a ^ " is already defined!"))
+        | None -> { vars = VarMap.add a var_map.index var_map.vars; index = var_map.index - 4 })
+  in
+  let generate_statements var_map sts =
+    List.fold_left generate_statement var_map sts
   in
   let generate_function f =
+    (* index is the next available offset to esp to save new local variables, at the
+     * beginning of a function, the index is one word (4 bytes) after the esp register. *)
+
+    let var_map = { vars = VarMap.empty; index =  -4 } in
     match f with
-    | IntFunction st ->
-        Buffer.add_string buf ".globl _main\n_main:\n";
-        generate_statement st
+    | IntFunction (fname, sts) -> 
+        Buffer.add_string buf ("_" ^ fname ^ ":\n");
+        (* Saving the previous stack start point and use esp as the new stack start. *)
+        Buffer.add_string buf "push    %ebp\nmovl    %esp, %ebp\n";
+        generate_statements var_map sts
   in
+
+  Buffer.add_string buf ".globl _main\n";
   match ast with
   | Program f ->
       generate_function f;

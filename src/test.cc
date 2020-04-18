@@ -1,4 +1,8 @@
 
 int main() {
-  return (2 + 1 * 2 * (-3 + 4) != 2+3) && 1 && 0;
+  int a;
+  int b = 2;
+  int c = b * 2;
+  return  (a + b + c) * 4;
 }
+

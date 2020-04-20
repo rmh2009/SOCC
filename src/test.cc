@@ -1,7 +1,7 @@
 
 int main() {
-  int b = 2;
-  int a = 1? b = 0? 2: 3 : 4 ? 5 : 6;
+  int a;
+  if (0) a = 1 else a = 2;
   return a;
 }
 

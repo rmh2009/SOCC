@@ -135,6 +135,13 @@ let generate_assembly ast =
         generate_block_item var_map (StatementItem(st2));
         Buffer.add_string buf (cond_end_label ^ ":\n");
         var_map
+    | StatementItem (ConditionalStatement (exp, st1, None)) ->
+        let cond_end_label = get_unique_label "_condend" count in
+        generate_expression var_map exp;
+        Buffer.add_string buf ("cmpl    $0, %eax\nje    " ^ cond_end_label ^ "\n");
+        let var_map = generate_block_item var_map (StatementItem(st1)) in
+        Buffer.add_string buf (cond_end_label ^ ":\n");
+        var_map
     | DeclareItem (DeclareStatement (a, exp_opt)) ->
         (match exp_opt with
         | None ->

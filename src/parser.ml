@@ -83,7 +83,8 @@ let print_ast ast =
     (print_statement (spaces+1) st1) ^
     (print_statement (spaces+1) st2))
     | ConditionalStatement (exp, st1, None) -> ((String.make spaces ' ') ^ "ConditionStatement:\n" ^
-    (print_expression (spaces+1) exp))
+    (print_expression (spaces+1) exp) ^
+    (print_statement (spaces+1) st1))
   in
   let print_declare spaces st =
     match st with

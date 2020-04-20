@@ -25,7 +25,10 @@ type token_t =
   | Greater
   | GreaterOrEqual
   | Assignment
-
+  | IfKeyword
+  | ElseKeyword
+  | Colon
+  | QuestionMark
 
 let read_file_content file_name =
   let file = open_in file_name in
@@ -67,6 +70,10 @@ let print_token token =
   | Greater -> "Greater"
   | GreaterOrEqual -> "GreaterOrEqual"
   | Assignment -> "Assignment"
+  | IfKeyword -> "If"
+  | ElseKeyword -> "Else"
+  | Colon -> "Colon"
+  | QuestionMark -> "QuestionMark"
 
 exception LexerError of string
 
@@ -96,6 +103,8 @@ let parse_tokens content =
     if word = "main" then MainKeyword, loc
     else if word = "int" then IntKeyword, loc
     else if word = "return" then ReturnKeyword, loc
+    else if word = "if" then IfKeyword, loc
+    else if word = "else" then ElseKeyword, loc
     else if (is_alpha (String.get word 0)) then (Identifier word), loc
     else (IntegerLiteral word), loc
     in
@@ -116,6 +125,8 @@ let parse_tokens content =
     | '+' -> Addition, i+1
     | '*' -> Multiplication, i+1
     | '/' -> Division, i+1
+    | ':' -> Colon, i+1
+    | '?' -> QuestionMark, i+1
     | '&' ->
         if (String.get content (i+1)) = '&' then And, i+2
         else raise (LexerError "Expeting another & sign.")

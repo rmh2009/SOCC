@@ -97,24 +97,45 @@ let generate_assembly ast =
             generate_expression var_map exp2;
             Buffer.add_string buf ("cmpl    $0, %eax\nmovl    $0, %eax\nsetne    %al\n");
             Buffer.add_string buf (end_label ^ ":\n")
+        | ConditionExp (exp1, exp2, exp3) ->
+            generate_expression var_map exp1;
+            let cond_label = get_unique_label "_cond" count in
+            let cond_end_label = get_unique_label "_condend" count in
+            Buffer.add_string buf ("cmpl    $0, %eax\nje    " ^ cond_label ^ "\n");
+            generate_expression var_map exp2;
+            Buffer.add_string buf ("jmp    " ^ cond_end_label ^ "\n");
+            Buffer.add_string buf (cond_label ^ ":\n");
+            generate_expression var_map exp3;
+            Buffer.add_string buf (cond_end_label ^ ":\n");
         | AssignExp (a, exp) ->
             (match VarMap.find_opt a var_map.vars with
             | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
             | Some offset -> 
+                generate_expression var_map exp;
                 Buffer.add_string buf ("movl  %eax, " ^ (string_of_int offset) ^ "(%ebp)\n"))
-
   in
-  let generate_statement var_map st =
+  let rec generate_block_item var_map st =
     match st with
-    | ReturnStatement exp ->
+    | StatementItem (ReturnStatement exp) ->
         generate_expression var_map exp;
         Buffer.add_string buf "movl    %ebp, %esp\npop    %ebp\n";
         Buffer.add_string buf "ret\n";
         var_map
-    | ExpressionStatement (exp) ->
+    | StatementItem (ExpressionStatement exp) ->
         generate_expression var_map exp;
         var_map
-    | DeclareStatement (a, exp_opt) ->
+    | StatementItem (ConditionalStatement (exp, st1, Some st2)) ->
+        let cond_label = get_unique_label "_cond" count in
+        let cond_end_label = get_unique_label "_condend" count in
+        generate_expression var_map exp;
+        Buffer.add_string buf ("cmpl    $0, %eax\nje    " ^ cond_label ^ "\n");
+        let var_map = generate_block_item var_map (StatementItem(st1)) in
+        Buffer.add_string buf ("jmp    " ^ cond_end_label ^ "\n");
+        Buffer.add_string buf (cond_label ^ ":\n");
+        generate_block_item var_map (StatementItem(st2));
+        Buffer.add_string buf (cond_end_label ^ ":\n");
+        var_map
+    | DeclareItem (DeclareStatement (a, exp_opt)) ->
         (match exp_opt with
         | None ->
             Buffer.add_string buf "movl    $0, %eax\n"
@@ -126,7 +147,7 @@ let generate_assembly ast =
         | None -> { vars = VarMap.add a var_map.index var_map.vars; index = var_map.index - 4 })
   in
   let generate_statements var_map sts =
-    List.fold_left generate_statement var_map sts
+    List.fold_left generate_block_item var_map sts
   in
   let generate_function f =
     (* index is the next available offset to esp to save new local variables, at the
@@ -142,9 +163,9 @@ let generate_assembly ast =
   in
 
   Buffer.add_string buf ".globl _main\n";
-  match ast with
+  (match ast with
   | Program f ->
-      generate_function f;
+      generate_function f);
   Buffer.contents buf
 
 let _ =

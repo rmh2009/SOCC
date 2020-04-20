@@ -24,14 +24,22 @@ type expression_t =
   | OrExp of expression_t * expression_t 
   | AndExp of expression_t * expression_t 
   | AssignExp of string * expression_t
+  | ConditionExp of expression_t * expression_t * expression_t
 
 type statement_t =
   ReturnStatement of expression_t
-  | DeclareStatement of string * expression_t option
   | ExpressionStatement of expression_t
+  | ConditionalStatement of expression_t * statement_t * statement_t option
+
+type declare_t =
+  DeclareStatement of string * expression_t option
+
+type block_item_t =
+  StatementItem of statement_t
+  | DeclareItem of declare_t
 
 type function_t =
-  IntFunction of string * statement_t list
+  IntFunction of string * block_item_t list
 
 type program_t =
   Program of function_t
@@ -61,17 +69,35 @@ let print_ast ast =
     | OrExp (exp1, exp2)  -> print_binary spaces "LogicalOr" exp1 exp2
     | AndExp (exp1, exp2)  -> print_binary spaces "LogicalAnd" exp1 exp2
     | AssignExp (a, st) -> (String.make spaces ' ') ^ "Assignment of " ^ a ^ ":\n" ^ (print_expression (spaces+1) st)
+    | ConditionExp(exp1, exp2, exp3) -> ((String.make spaces ' ') ^ "ConditionExp:\n" ^
+    (print_expression (spaces+1) exp1) ^
+    (print_expression (spaces+1) exp2) ^
+    (print_expression (spaces+1) exp3))
   in
-  let print_statement spaces st =
+  let rec print_statement spaces st =
     match st with
     | ReturnStatement exp -> (String.make spaces ' ') ^ "Return Statement: \n" ^ (print_expression (spaces+1) exp)
+    | ExpressionStatement exp -> (String.make spaces ' ') ^ "Expression Statement: \n" ^ (print_expression (spaces+1) exp)
+    | ConditionalStatement (exp, st1, Some st2) -> ((String.make spaces ' ') ^ "ConditionStatement:\n" ^
+    (print_expression (spaces+1) exp) ^
+    (print_statement (spaces+1) st1) ^
+    (print_statement (spaces+1) st2))
+    | ConditionalStatement (exp, st1, None) -> ((String.make spaces ' ') ^ "ConditionStatement:\n" ^
+    (print_expression (spaces+1) exp))
+  in
+  let print_declare spaces st =
+    match st with
     | DeclareStatement (a, None) -> (String.make spaces ' ') ^ "Declare Statement of " ^ a ^ "\n" ;
     | DeclareStatement (a, Some exp) -> (String.make spaces ' ') ^ "Declare and Init Statement of " ^ a ^ ":\n" ^ (print_expression (spaces+1) exp)
-    | ExpressionStatement exp -> (String.make spaces ' ') ^ "Expression Statement: \n" ^ (print_expression (spaces+1) exp)
+  in
+  let print_block_item spaces item =
+    match item with
+    | StatementItem st -> (String.make spaces ' ') ^ "StatementItem:\n" ^ (print_statement (spaces+1) st)
+    | DeclareItem decl -> (String.make spaces ' ') ^ "DeclareItem:\n" ^ (print_declare (spaces+1) decl)
   in
   let print_function spaces f =
     let print_statements spaces statements=
-      List.fold_left (fun acc st -> acc ^ (print_statement spaces st)) "" statements
+      List.fold_left (fun acc st -> acc ^ (print_block_item spaces st)) "" statements
     in
     match f with
     | IntFunction (a, sts) -> (String.make spaces ' ') ^ "Function " ^ a ^ ": \n" ^ (print_statements (spaces+1) sts)
@@ -197,52 +223,91 @@ and parse_logical_or_expression tokens =
   let exp, left = parse_logical_and_expression tokens in
   parse_expression_rec exp left
 
+and parse_conditional_expression tokens =
+  let first_exp, left = parse_logical_or_expression tokens in
+  match left with
+  | QuestionMark :: r ->
+      let second_exp, r2 = parse_expression r in
+      ( match r2 with
+      | Colon :: r3 ->
+          let third_exp, r4 = parse_expression r3 in
+          ConditionExp(first_exp, second_exp, third_exp), r4
+      | a :: _ -> fail ("Expecting Colon, but see " ^ (print_token a))
+      | [] -> fail ("Expecting Colon, but see end of file."))
+  | _ -> first_exp, left
+
 and parse_expression tokens =
   (* Parses an expression. *)
   match tokens with
   | Identifier (a) :: Assignment :: r ->
       let exp, left = parse_expression r in
       AssignExp (a, exp), left
-  | l -> parse_logical_or_expression l
+  | l -> parse_conditional_expression l
 
-(* Parses tokens to get a statement, returns the statement and the remaining tokens. *)
-let parse_statement tokens =
+let rec parse_statement tokens =
           match tokens with
   | [] -> fail "Empty statement."
   | ReturnKeyword :: r ->
       let expression, left = parse_expression r in
-      ( match left with
-      | Semicolon :: tl -> ReturnStatement expression, tl
-      | _ -> fail "Expecting semicolon." )
-  | IntKeyword :: Identifier (a) :: Assignment :: r ->
-      let exp, left = parse_expression r in
-      ( match left with
-      | Semicolon :: tl -> DeclareStatement (a, Some exp), tl
-      | _ -> fail "Expecting semicolon." )
-  | IntKeyword :: Identifier (a) :: Semicolon :: r ->
-      DeclareStatement(a, None), r
+      ReturnStatement expression, left
+  | IfKeyword :: LeftParentheses :: r ->
+      let cond_exp, r1 = parse_expression r in
+      ( match r1 with
+      | RightParentheses :: r2 ->
+          let first_st, r3 = parse_statement r2 in
+          ( match r3 with
+          | ElseKeyword :: r4 ->
+              let second_st, r5 = parse_statement r4 in
+              ConditionalStatement(cond_exp, first_st, Some second_st), r5
+          | _ -> ConditionalStatement(cond_exp, first_st, None), r3)
+      | _ -> fail "Expecting right parentheses in parse_statement")
   | l -> 
       let exp, left = parse_expression l in
-      ( match left with
-      | Semicolon :: tl -> ExpressionStatement (exp), tl
-      | _ -> fail "Expecting semicolon." )
+      ExpressionStatement (exp), left
+
+let parse_declare tokens =
+  match tokens with
+  | [] -> fail "Empty declare statement."
+  | IntKeyword :: Identifier (a) :: Assignment :: r ->
+      let exp, left = parse_expression r in
+      DeclareStatement (a, Some exp), left
+  | IntKeyword :: Identifier (a) :: r->
+      DeclareStatement(a, None), r
+  | a :: r -> fail ("Unexpected token in parse_declare " ^ (print_token a))
+
+(* Parses tokens to get a statement, returns the statement and the remaining tokens. *)
+let parse_block_item tokens =
+  let result, r =
+          match tokens with
+  | [] -> fail "Empty statement or declare statement."
+  | IntKeyword :: Identifier (a) :: r ->
+      let declare, r = parse_declare tokens in
+      DeclareItem declare, r
+  | _ -> 
+      let st, r = parse_statement tokens in
+      StatementItem st, r
+  in
+  match r with
+  | Semicolon:: r2 -> result, r2
+  | a -> 
+      fail "Expecting semicolon in parse_block_item."
 
 (* Parses tokens to get a function, returns the function and the remaining tokens. *)
 let parse_function tokens =
-  let rec parse_statements acc tokens =
+  let rec parse_block_items acc tokens =
     match tokens with 
       | RightBrace :: r -> (List.rev acc), r
-      | l -> let statement, left = parse_statement tokens 
+      | l -> let statement, left = parse_block_item tokens 
       in
-      parse_statements (statement :: acc) left
+      parse_block_items (statement :: acc) left
       in
   match tokens with
   | [] -> fail "Empty function."
   | IntKeyword :: MainKeyword :: LeftParentheses :: RightParentheses:: LeftBrace :: r ->
-      let statements, left = parse_statements [] r in
+      let statements, left = parse_block_items [] r in
       IntFunction ("main", statements), left
   | IntKeyword :: Identifier (a) :: LeftParentheses :: RightParentheses:: LeftBrace :: r ->
-      let statements, left = parse_statements [] r in
+      let statements, left = parse_block_items [] r in
       IntFunction (a, statements), left
   | a :: r -> fail ("Unexpected token in parse_function: " ^ (print_token a))
 

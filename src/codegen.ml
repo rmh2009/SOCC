@@ -122,8 +122,10 @@ let generate_assembly ast =
         Buffer.add_string buf "movl    %ebp, %esp\npop    %ebp\n";
         Buffer.add_string buf "ret\n";
         var_map
-    | StatementItem (ExpressionStatement exp) ->
+    | StatementItem (ExpressionStatement (Some exp)) ->
         generate_expression var_map exp;
+        var_map
+    | StatementItem (ExpressionStatement None) ->
         var_map
     | StatementItem (ConditionalStatement (exp, st1, Some st2)) ->
         let cond_label = get_unique_label "_cond" count in
@@ -143,6 +145,41 @@ let generate_assembly ast =
         let var_map = generate_block_item var_map (StatementItem(st1)) in
         Buffer.add_string buf (cond_end_label ^ ":\n");
         var_map
+    | StatementItem (ForStatement(exp1_opt, exp2, exp3_opt, st)) ->
+        let cond_label = get_unique_label "_forcond" count in
+        let end_label = get_unique_label "_forend" count in
+        (match exp1_opt with
+        | None -> ()
+        | Some exp -> generate_expression var_map exp; ());
+        Buffer.add_string buf (cond_label ^ ":\n");
+        generate_expression var_map exp2;
+        Buffer.add_string buf ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
+        let inner_var_map = generate_block_item {vars = var_map.vars; cur_scope_vars = VarMap.empty; index = var_map.index} (StatementItem(st)) in
+        (match exp3_opt with
+        | None -> ()
+        | Some exp -> generate_expression var_map exp; ());
+        Buffer.add_string buf ("jmp    " ^ cond_label ^ "\n");
+        Buffer.add_string buf (end_label ^ ":\n");
+        var_map
+
+    | StatementItem (ForDeclStatement(declare, exp2, exp3_opt, st)) ->
+        let cond_label = get_unique_label "_forcond" count in
+        let end_label = get_unique_label "_forend" count in
+        let condition_var_map = generate_block_item {vars = var_map.vars; cur_scope_vars = VarMap.empty; index = var_map.index} (DeclareItem(declare)) in
+        Buffer.add_string buf (cond_label ^ ":\n");
+        generate_expression condition_var_map exp2;
+        Buffer.add_string buf ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
+        let inner_var_map = generate_block_item {vars = condition_var_map.vars; cur_scope_vars = VarMap.empty; index = condition_var_map.index} (StatementItem(st)) in
+        (match exp3_opt with
+        | None -> ()
+        | Some exp -> generate_expression condition_var_map exp);
+        Buffer.add_string buf ("jmp    " ^ cond_label ^ "\n");
+        Buffer.add_string buf (end_label ^ ":\n");
+        (* The variables declared in the block will be deacllocated automatically inside generate_block_item. *)
+        (* The condition expressions has its own scope, needs to be deallocated here. *)
+        Buffer.add_string buf ("addl $" ^ (string_of_int (4 *  VarMap.cardinal condition_var_map.cur_scope_vars)) ^ ", %esp\n");
+        var_map
+
     | StatementItem (CompoundStatement(items)) ->
         (* Entering a new scope, so clear the cur_scope_vars, but we ignore the inner var_map returned. *)
         let inner_var_map = generate_block_statements {vars = var_map.vars; cur_scope_vars = VarMap.empty; index = var_map.index} items in

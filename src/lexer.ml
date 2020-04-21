@@ -29,6 +29,11 @@ type token_t =
   | ElseKeyword
   | Colon
   | QuestionMark
+  | ForKeyword
+  | WhileKeyword
+  | DoKeyword
+  | BreakKeyword
+  | ContinueKeyword
 
 let read_file_content file_name =
   let file = open_in file_name in
@@ -74,6 +79,11 @@ let print_token token =
   | ElseKeyword -> "Else"
   | Colon -> "Colon"
   | QuestionMark -> "QuestionMark"
+  | ForKeyword -> "For"
+  | WhileKeyword -> "While"
+  | DoKeyword -> "Do"
+  | BreakKeyword -> "Break"
+  | ContinueKeyword -> "Continue"
 
 exception LexerError of string
 
@@ -105,6 +115,11 @@ let parse_tokens content =
     else if word = "return" then ReturnKeyword, loc
     else if word = "if" then IfKeyword, loc
     else if word = "else" then ElseKeyword, loc
+    else if word = "for" then ForKeyword, loc
+    else if word = "while" then WhileKeyword, loc
+    else if word = "do" then DoKeyword, loc
+    else if word = "break" then BreakKeyword, loc
+    else if word = "continue" then ContinueKeyword, loc
     else if (is_alpha (String.get word 0)) then (Identifier word), loc
     else (IntegerLiteral word), loc
     in

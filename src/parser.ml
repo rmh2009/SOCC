@@ -28,9 +28,15 @@ type expression_t =
 
 type statement_t =
   ReturnStatement of expression_t
-  | ExpressionStatement of expression_t
+  | ExpressionStatement of expression_t option
   | ConditionalStatement of expression_t * statement_t * statement_t option
   | CompoundStatement of block_item_t list
+  | ForStatement of expression_t option * expression_t * expression_t option * statement_t
+  | ForDeclStatement of declare_t * expression_t * expression_t option * statement_t
+  | WhileStatement of expression_t * statement_t
+  | DoStatement of statement_t * expression_t
+  | BreakStatement
+  | ContinueStatement
 
 and declare_t =
   DeclareStatement of string * expression_t option
@@ -91,10 +97,16 @@ let print_ast ast =
     (print_expression (spaces+1) exp2) ^
     (print_expression (spaces+1) exp3))
   in
+  let print_expression_option spaces exp_opt =
+    match exp_opt with
+    | None -> ""
+    | Some exp -> print_expression spaces exp
+  in
   let rec print_statement spaces st =
     match st with
     | ReturnStatement exp -> (String.make spaces ' ') ^ "Return Statement: \n" ^ (print_expression (spaces+1) exp)
-    | ExpressionStatement exp -> (String.make spaces ' ') ^ "Expression Statement: \n" ^ (print_expression (spaces+1) exp)
+    | ExpressionStatement (Some exp)-> (String.make spaces ' ') ^ "Expression Statement: \n" ^ (print_expression (spaces+1) exp)
+    | ExpressionStatement (None)-> (String.make spaces ' ') ^ "Empty expression statement"
     | ConditionalStatement (exp, st1, Some st2) -> ((String.make spaces ' ') ^ "ConditionStatement:\n" ^
     (print_expression (spaces+1) exp) ^
     (print_statement (spaces+1) st1) ^
@@ -104,6 +116,25 @@ let print_ast ast =
     | ConditionalStatement (exp, st1, None) -> ((String.make spaces ' ') ^ "ConditionStatement:\n" ^
     (print_expression (spaces+1) exp) ^
     (print_statement (spaces+1) st1))
+    | ForStatement (exp1_opt, exp2, exp3_opt, st) -> (String.make spaces ' ') ^ "ForStatement:\n" ^
+    (print_expression_option (spaces+1) exp1_opt) ^
+    (print_expression (spaces+1) exp2) ^
+    (print_expression_option (spaces+1) exp3_opt) ^
+    (print_statement (spaces+1) st)
+    | ForDeclStatement(decl, exp2, exp3_opt, st) -> (String.make spaces ' ') ^ "ForDeclareStatement:\n" ^
+    (print_declare (spaces+1) decl) ^
+    (print_expression (spaces+1) exp2) ^
+    (print_expression_option (spaces+1) exp3_opt) ^
+    (print_statement (spaces+1) st)
+    | DoStatement (st, exp) -> (String.make spaces ' ') ^ "DoStatementt:\n" ^
+    (print_expression (spaces+1) exp) ^
+    (print_statement (spaces+1) st)
+    | WhileStatement (exp, st) -> (String.make spaces ' ') ^ "WhileStatementt:\n" ^
+    (print_expression (spaces+1) exp) ^
+    (print_statement (spaces+1) st)
+    | ContinueStatement -> (String.make spaces ' ') ^ "Continue\n"
+    | BreakStatement -> (String.make spaces ' ') ^ "Break\n"
+
   and print_declare spaces st =
     match st with
     | DeclareStatement (a, None) -> (String.make spaces ' ') ^ "Declare Statement of " ^ a ^ "\n" ;
@@ -257,8 +288,25 @@ and parse_expression tokens =
       AssignExp (a, exp), left
   | l -> parse_conditional_expression l
 
+(* Returns expression Option. If the next token is Semi-colon will return None. *)
+let parse_expression_opt tokens = 
+  match tokens with
+  | Semicolon :: _ -> None, tokens
+  | RightParentheses :: _ -> None, tokens
+  | _ -> let exp, r = parse_expression tokens in
+  (Some exp), r
+
 (* Does not consume the trailing Semicolon (if there is one). *)
 let rec parse_statement tokens =
+  let parse_expression_opt_or_declare tokens = 
+    if (peek tokens) = Semicolon then None, None, tokens
+    else if peek tokens = IntKeyword then
+      let declare, r = parse_declare tokens in
+      None, Some declare, r
+    else
+      let exp, r = parse_expression tokens in
+      Some exp, None, r
+  in
           match tokens with
   | [] -> fail "Empty statement."
   | ReturnKeyword :: r ->
@@ -267,6 +315,35 @@ let rec parse_statement tokens =
   | LeftBrace :: r ->
       let block_items, left = parse_block_items [] r in
       CompoundStatement(block_items), left
+  | BreakKeyword :: r -> BreakStatement, r
+  | ContinueKeyword :: r -> ContinueStatement, r
+  | WhileKeyword :: LeftParentheses :: r -> 
+      let exp, r = parse_expression r in
+      let r = consume_token RightParentheses r in
+      let st, r = parse_statement r in
+      WhileStatement(exp, st), r
+  | DoKeyword :: r ->
+      let st, r = parse_statement r in
+      let r = consume_token WhileKeyword r in
+      let r = consume_token LeftParentheses r in
+      let exp, r = parse_expression r in
+      let r = consume_token RightParentheses r in
+      DoStatement(st, exp), r
+  | ForKeyword :: LeftParentheses :: left ->
+      let exp1, declare, left = parse_expression_opt_or_declare left in
+      let left = consume_token Semicolon left in
+      let exp2, left = parse_expression_opt left in
+      let left = consume_token Semicolon left in
+      let exp3, left = parse_expression_opt left in
+      let exp2 = (match exp2 with
+      | None -> ConstantIntExp(1)
+      | Some exp -> exp)
+      in
+      let left = consume_token RightParentheses left in
+      let st, left = parse_statement left in
+      (match declare with
+      | None -> ForStatement (exp1, exp2, exp3, st), left
+      | Some d -> ForDeclStatement(d, exp2, exp3, st), left)
   | IfKeyword :: LeftParentheses :: r ->
       let cond_exp, r1 = parse_expression r in
       ( match r1 with
@@ -280,7 +357,7 @@ let rec parse_statement tokens =
       | _ -> fail "Expecting right parentheses in parse_statement")
   | l -> 
       let exp, left = parse_expression l in
-      ExpressionStatement (exp), left
+      ExpressionStatement (Some exp), left
 
 (* Does not consume the trailing Semicolon. *)
 and parse_declare tokens =
@@ -311,6 +388,10 @@ and parse_block_item tokens =
   | StatementItem(CompoundStatement (_)) -> result, r
   | StatementItem(ConditionalStatement(_, _, Some CompoundStatement(_))) -> result, r
   | StatementItem(ConditionalStatement(_, CompoundStatement(_), None)) -> result, r
+  | StatementItem(ForStatement(_, _, _, CompoundStatement(_))) -> result, r
+  | StatementItem(ForDeclStatement(_, _, _, CompoundStatement(_))) -> result, r
+  | StatementItem(WhileStatement(_, CompoundStatement(_))) -> result, r
+  | StatementItem(DoStatement(_)) -> result, r
   | _ -> result, (consume_token Semicolon r)
 
 and parse_block_items acc tokens =

@@ -59,6 +59,9 @@ run_test "conditional_statement2_expect_2.cc" 2
 run_test "conditional_statement_expect_2.cc" 2
 run_test "local_variable_expect_24.cc" 24
 run_test "unary_operator_expect_0.cc" 0
+run_test "for_loop_expect_10.cc" 10
+run_test "for_loop2_expect_10.cc" 10
+run_test "for_loop3_expect_10.cc" 10
 }
 
 echo "Running all unit tests."

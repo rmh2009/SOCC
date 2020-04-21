@@ -6,7 +6,7 @@ module VarMap = Map.Make(String)
 
 exception CodeGenError of string
 
-type var_map_t = { vars: int VarMap.t ; index : int}
+type var_map_t = { vars: int VarMap.t ; cur_scope_vars: int VarMap.t; index : int}
 
 (* Generates the assembly code as a string given the ast in Parser.program_t type. *)
 let generate_assembly ast =
@@ -114,6 +114,7 @@ let generate_assembly ast =
                 generate_expression var_map exp;
                 Buffer.add_string buf ("movl  %eax, " ^ (string_of_int offset) ^ "(%ebp)\n"))
   in
+
   let rec generate_block_item var_map st =
     match st with
     | StatementItem (ReturnStatement exp) ->
@@ -142,6 +143,12 @@ let generate_assembly ast =
         let var_map = generate_block_item var_map (StatementItem(st1)) in
         Buffer.add_string buf (cond_end_label ^ ":\n");
         var_map
+    | StatementItem (CompoundStatement(items)) ->
+        (* Entering a new scope, so clear the cur_scope_vars, but we ignore the inner var_map returned. *)
+        let inner_var_map = generate_block_statements {vars = var_map.vars; cur_scope_vars = VarMap.empty; index = var_map.index} items in
+        (* Move stack pointer %esp back by number of allocations in the inner scope. This is like deallocating inner variables.*)
+        Buffer.add_string buf ("addl $" ^ (string_of_int (4 *  VarMap.cardinal inner_var_map.cur_scope_vars)) ^ ", %esp\n");
+        var_map
     | DeclareItem (DeclareStatement (a, exp_opt)) ->
         (match exp_opt with
         | None ->
@@ -149,24 +156,26 @@ let generate_assembly ast =
         | Some exp ->
             generate_expression var_map exp);
         Buffer.add_string buf "push    %eax\n";
-        (match (VarMap.find_opt a var_map.vars) with
-        | Some x -> raise (CodeGenError ("Var " ^ a ^ " is already defined!"))
-        | None -> { vars = VarMap.add a var_map.index var_map.vars; index = var_map.index - 4 })
-  in
-  let generate_statements var_map sts =
+        (match (VarMap.find_opt a var_map.cur_scope_vars) with
+        | Some x -> raise (CodeGenError ("Var " ^ a ^ " is already defined in current scope!"))
+        | None -> { vars = VarMap.add a var_map.index var_map.vars;
+        cur_scope_vars = VarMap.add a var_map.index var_map.cur_scope_vars;
+        index = var_map.index - 4 })
+
+  and generate_block_statements var_map sts =
     List.fold_left generate_block_item var_map sts
   in
   let generate_function f =
     (* index is the next available offset to esp to save new local variables, at the
      * beginning of a function, the index is one word (4 bytes) after the esp register. *)
 
-    let var_map = { vars = VarMap.empty; index =  -4 } in
+  let var_map = { vars = VarMap.empty; cur_scope_vars = VarMap.empty; index =  -4 } in
     match f with
-    | IntFunction (fname, sts) -> 
+    | IntFunction (fname, items) -> 
         Buffer.add_string buf ("_" ^ fname ^ ":\n");
         (* Saving the previous stack start point and use esp as the new stack start. *)
         Buffer.add_string buf "push    %ebp\nmovl    %esp, %ebp\n";
-        generate_statements var_map sts
+        generate_block_statements var_map items
   in
 
   Buffer.add_string buf ".globl _main\n";

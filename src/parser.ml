@@ -45,6 +45,22 @@ type function_t =
 type program_t =
   Program of function_t
 
+exception TokenError of string
+
+let fail message =
+  raise (TokenError message)
+
+let peek tokens =
+  match tokens with
+  | [] -> fail "No tokens left in peek tokens."
+  | a :: _ -> a
+
+let consume_token token tokens =
+  match tokens with
+  | hd :: tl -> if hd = token then tl
+  else fail ("Failed to consume token: " ^ (print_token token) ^ ", saw token: " ^ (print_token hd))
+  | [] -> fail ("No tokens left in consuming tokens, expecting token: " ^ (print_token token))
+
 let print_ast ast =
   let rec print_expression spaces exp =
     let rec print_binary spaces op exp1 exp2 =
@@ -106,11 +122,6 @@ let print_ast ast =
   in
   match ast with
   | Program f -> "Program: \n" ^ (print_function 1 f)
-
-exception TokenError of string
-
-let fail message =
-  raise (TokenError message)
 
 let rec parse_factor tokens =
   (* Parses a factor. *)
@@ -246,6 +257,7 @@ and parse_expression tokens =
       AssignExp (a, exp), left
   | l -> parse_conditional_expression l
 
+(* Does not consume the trailing Semicolon (if there is one). *)
 let rec parse_statement tokens =
           match tokens with
   | [] -> fail "Empty statement."
@@ -270,6 +282,7 @@ let rec parse_statement tokens =
       let exp, left = parse_expression l in
       ExpressionStatement (exp), left
 
+(* Does not consume the trailing Semicolon. *)
 and parse_declare tokens =
   match tokens with
   | [] -> fail "Empty declare statement."
@@ -281,6 +294,7 @@ and parse_declare tokens =
   | a :: r -> fail ("Unexpected token in parse_declare " ^ (print_token a))
 
 (* Parses tokens to get a statement, returns the statement and the remaining tokens. *)
+(* This function consumes the trailing ; if it exists. *)
 and parse_block_item tokens =
   let result, r =
           match tokens with
@@ -295,11 +309,9 @@ and parse_block_item tokens =
   (* CompoundStatement does not have a trailing semi-colon. *)
   match result with
   | StatementItem(CompoundStatement (_)) -> result, r
-  | _ -> 
-      (match r with
-      | Semicolon:: r2 -> result, r2
-      | a -> 
-      fail ("Expecting semicolon in parse_block_item, but saw: " ^ (print_token (List.hd a))))
+  | StatementItem(ConditionalStatement(_, _, Some CompoundStatement(_))) -> result, r
+  | StatementItem(ConditionalStatement(_, CompoundStatement(_), None)) -> result, r
+  | _ -> result, (consume_token Semicolon r)
 
 and parse_block_items acc tokens =
     match tokens with 

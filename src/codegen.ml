@@ -180,6 +180,25 @@ let generate_assembly ast =
         Buffer.add_string buf ("addl $" ^ (string_of_int (4 *  VarMap.cardinal condition_var_map.cur_scope_vars)) ^ ", %esp\n");
         var_map
 
+    | StatementItem(WhileStatement(exp, st)) ->
+        let cond_label = get_unique_label "_whilecond" count in
+        let end_label = get_unique_label "_whileend" count in
+        Buffer.add_string buf (cond_label ^ ":\n");
+        generate_expression var_map exp;
+        Buffer.add_string buf ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
+        generate_block_item var_map (StatementItem(st));
+        Buffer.add_string buf ("jmp    " ^ cond_label ^ "\n");
+        Buffer.add_string buf (end_label ^ ":\n");
+        var_map
+
+    | StatementItem(DoStatement(st, exp)) ->
+        let begin_label = get_unique_label "_dobegin" count in
+        Buffer.add_string buf (begin_label ^ ":\n");
+        generate_block_item var_map (StatementItem(st));
+        generate_expression var_map exp;
+        Buffer.add_string buf ("cmpl    $0, %eax\njne    " ^ begin_label ^ "\n");
+        var_map
+
     | StatementItem (CompoundStatement(items)) ->
         (* Entering a new scope, so clear the cur_scope_vars, but we ignore the inner var_map returned. *)
         let inner_var_map = generate_block_statements {vars = var_map.vars; cur_scope_vars = VarMap.empty; index = var_map.index} items in

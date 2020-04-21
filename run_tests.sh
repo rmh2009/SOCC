@@ -62,6 +62,8 @@ run_test "unary_operator_expect_0.cc" 0
 run_test "for_loop_expect_10.cc" 10
 run_test "for_loop2_expect_10.cc" 10
 run_test "for_loop3_expect_10.cc" 10
+run_test "do_loop_expect_10.cc" 10
+run_test "while_loop_expect_10.cc" 10
 }
 
 echo "Running all unit tests."

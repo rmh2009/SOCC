@@ -64,6 +64,14 @@ run_test "for_loop2_expect_10.cc" 10
 run_test "for_loop3_expect_10.cc" 10
 run_test "do_loop_expect_10.cc" 10
 run_test "while_loop_expect_10.cc" 10
+run_test "break_in_for_loop2_expect_15.cc" 15
+run_test "break_in_for_loop_expect_15.cc" 15
+run_test "break_inner_compound_expect_5.cc" 5
+run_test "continue_in_do_loop2_expect_15.cc" 15
+run_test "continue_in_do_loop_expect_15.cc" 15
+run_test "continue_in_for_loop2_expect_15.cc" 15
+run_test "continue_in_for_loop_expect_15.cc" 15
+run_test "continue_inner_loop_expect_15.cc" 15
 }
 
 echo "Running all unit tests."

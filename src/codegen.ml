@@ -6,7 +6,14 @@ module VarMap = Map.Make(String)
 
 exception CodeGenError of string
 
-type var_map_t = { vars: int VarMap.t ; cur_scope_vars: int VarMap.t; index : int}
+type var_map_t = {
+  vars: int VarMap.t ;
+  cur_scope_vars:
+    int VarMap.t;
+    index : int;
+    break_label: string;
+    continue_label: string;
+}
 
 (* Generates the assembly code as a string given the ast in Parser.program_t type. *)
 let generate_assembly ast =
@@ -115,6 +122,22 @@ let generate_assembly ast =
                 Buffer.add_string buf ("movl  %eax, " ^ (string_of_int offset) ^ "(%ebp)\n"))
   in
 
+  let update_break_continue_label var_map break continue =
+    { vars = var_map.vars;
+      cur_scope_vars = var_map.cur_scope_vars;
+      index = var_map.index;
+      continue_label = continue;
+      break_label = break}
+  in
+  
+  (* This is used to update the stack top pointer %esp after break/continue. This will always
+   * be on top of the current var_map.index.*)
+  let generate_update_esp buf var_map =
+    Buffer.add_string buf "movl    %ebp, %eax\n";
+    Buffer.add_string buf ("subl    $" ^ (string_of_int (-var_map.index - 4)) ^ ",  %eax\n");
+    Buffer.add_string buf "movl    %eax, %esp\n"
+  in
+
   let rec generate_block_item var_map st =
     match st with
     | StatementItem (ReturnStatement exp) ->
@@ -148,60 +171,103 @@ let generate_assembly ast =
     | StatementItem (ForStatement(exp1_opt, exp2, exp3_opt, st)) ->
         let cond_label = get_unique_label "_forcond" count in
         let end_label = get_unique_label "_forend" count in
+        let break_label = end_label in
+        let continue_label = get_unique_label "_forcontinue" count in
         (match exp1_opt with
         | None -> ()
         | Some exp -> generate_expression var_map exp; ());
         Buffer.add_string buf (cond_label ^ ":\n");
         generate_expression var_map exp2;
         Buffer.add_string buf ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
-        let inner_var_map = generate_block_item {vars = var_map.vars; cur_scope_vars = VarMap.empty; index = var_map.index} (StatementItem(st)) in
+        let inner_var_map = generate_block_item (update_break_continue_label var_map break_label continue_label) 
+        (StatementItem(st)) in
+        Buffer.add_string buf (continue_label ^ ":\n");
+        generate_update_esp buf var_map;
         (match exp3_opt with
         | None -> ()
         | Some exp -> generate_expression var_map exp; ());
         Buffer.add_string buf ("jmp    " ^ cond_label ^ "\n");
         Buffer.add_string buf (end_label ^ ":\n");
+        generate_update_esp buf var_map;
         var_map
 
     | StatementItem (ForDeclStatement(declare, exp2, exp3_opt, st)) ->
         let cond_label = get_unique_label "_forcond" count in
         let end_label = get_unique_label "_forend" count in
-        let condition_var_map = generate_block_item {vars = var_map.vars; cur_scope_vars = VarMap.empty; index = var_map.index} (DeclareItem(declare)) in
+        let break_label = end_label in
+        let continue_label = get_unique_label "_forcontinue" count in
+        let condition_var_map = generate_block_item
+        {vars = var_map.vars;
+        cur_scope_vars = VarMap.empty;
+        index = var_map.index;
+        break_label = "";
+        continue_label = ""} (DeclareItem(declare)) in
         Buffer.add_string buf (cond_label ^ ":\n");
         generate_expression condition_var_map exp2;
         Buffer.add_string buf ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
-        let inner_var_map = generate_block_item {vars = condition_var_map.vars; cur_scope_vars = VarMap.empty; index = condition_var_map.index} (StatementItem(st)) in
+        let inner_var_map = generate_block_item (update_break_continue_label condition_var_map break_label continue_label)
+        (StatementItem(st)) in
+        Buffer.add_string buf (continue_label ^ ":\n");
+        generate_update_esp buf condition_var_map;
         (match exp3_opt with
         | None -> ()
         | Some exp -> generate_expression condition_var_map exp);
         Buffer.add_string buf ("jmp    " ^ cond_label ^ "\n");
         Buffer.add_string buf (end_label ^ ":\n");
+        generate_update_esp buf condition_var_map;
         (* The variables declared in the block will be deacllocated automatically inside generate_block_item. *)
         (* The condition expressions has its own scope, needs to be deallocated here. *)
         Buffer.add_string buf ("addl $" ^ (string_of_int (4 *  VarMap.cardinal condition_var_map.cur_scope_vars)) ^ ", %esp\n");
         var_map
 
+    | StatementItem(BreakStatement) ->
+        if var_map.break_label = "" then raise (CodeGenError "Illegal break, no context.");
+        Buffer.add_string buf ("jmp    " ^ var_map.break_label ^ "\n");
+        var_map
+
+    | StatementItem(ContinueStatement) ->
+        if var_map.continue_label = "" then raise (CodeGenError "Illegal jump, no context.");
+        Buffer.add_string buf ("jmp    " ^ var_map.continue_label ^ "\n");
+        var_map
+
     | StatementItem(WhileStatement(exp, st)) ->
         let cond_label = get_unique_label "_whilecond" count in
         let end_label = get_unique_label "_whileend" count in
+        let break_label = end_label in
+        let continue_label = cond_label in
         Buffer.add_string buf (cond_label ^ ":\n");
+        generate_update_esp buf var_map;
         generate_expression var_map exp;
         Buffer.add_string buf ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
-        generate_block_item var_map (StatementItem(st));
+        generate_block_item (update_break_continue_label var_map break_label continue_label) (StatementItem(st));
         Buffer.add_string buf ("jmp    " ^ cond_label ^ "\n");
         Buffer.add_string buf (end_label ^ ":\n");
+        generate_update_esp buf var_map;
         var_map
 
     | StatementItem(DoStatement(st, exp)) ->
         let begin_label = get_unique_label "_dobegin" count in
+        let end_label = get_unique_label "_doend" count in
+        let break_label = end_label in
+        let continue_label = get_unique_label "_docontinue" count in
         Buffer.add_string buf (begin_label ^ ":\n");
-        generate_block_item var_map (StatementItem(st));
+        generate_block_item (update_break_continue_label var_map break_label continue_label) (StatementItem(st));
+        Buffer.add_string buf (continue_label ^ ":\n");
+        generate_update_esp buf var_map;
         generate_expression var_map exp;
         Buffer.add_string buf ("cmpl    $0, %eax\njne    " ^ begin_label ^ "\n");
+        Buffer.add_string buf (end_label ^ ":\n");
+        generate_update_esp buf var_map;
         var_map
 
     | StatementItem (CompoundStatement(items)) ->
         (* Entering a new scope, so clear the cur_scope_vars, but we ignore the inner var_map returned. *)
-        let inner_var_map = generate_block_statements {vars = var_map.vars; cur_scope_vars = VarMap.empty; index = var_map.index} items in
+        let inner_var_map = generate_block_statements
+        {vars = var_map.vars;
+        cur_scope_vars = VarMap.empty;
+        index = var_map.index;
+        continue_label = var_map.continue_label;
+        break_label = var_map.break_label} items in
         (* Move stack pointer %esp back by number of allocations in the inner scope. This is like deallocating inner variables.*)
         Buffer.add_string buf ("addl $" ^ (string_of_int (4 *  VarMap.cardinal inner_var_map.cur_scope_vars)) ^ ", %esp\n");
         var_map
@@ -216,7 +282,9 @@ let generate_assembly ast =
         | Some x -> raise (CodeGenError ("Var " ^ a ^ " is already defined in current scope!"))
         | None -> { vars = VarMap.add a var_map.index var_map.vars;
         cur_scope_vars = VarMap.add a var_map.index var_map.cur_scope_vars;
-        index = var_map.index - 4 })
+        index = var_map.index - 4;
+        break_label = var_map.break_label;
+        continue_label = var_map.continue_label})
 
   and generate_block_statements var_map sts =
     List.fold_left generate_block_item var_map sts
@@ -225,7 +293,12 @@ let generate_assembly ast =
     (* index is the next available offset to esp to save new local variables, at the
      * beginning of a function, the index is one word (4 bytes) after the esp register. *)
 
-  let var_map = { vars = VarMap.empty; cur_scope_vars = VarMap.empty; index =  -4 } in
+  let var_map = {
+    vars = VarMap.empty;
+    cur_scope_vars = VarMap.empty;
+    index =  -4;
+    break_label = "";
+    continue_label = ""} in
     match f with
     | IntFunction (fname, items) -> 
         Buffer.add_string buf ("_" ^ fname ^ ":\n");

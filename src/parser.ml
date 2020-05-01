@@ -25,6 +25,7 @@ type expression_t =
   | AndExp of expression_t * expression_t 
   | AssignExp of string * expression_t
   | ConditionExp of expression_t * expression_t * expression_t
+  | FunctionCallExp of string * expression_t list
 
 type statement_t =
   ReturnStatement of expression_t
@@ -46,10 +47,10 @@ and block_item_t =
   | DeclareItem of declare_t
 
 type function_t =
-  IntFunction of string * block_item_t list
+  IntFunction of string * string list * block_item_t list option
 
 type program_t =
-  Program of function_t
+  Program of function_t list
 
 exception TokenError of string
 
@@ -96,6 +97,8 @@ let print_ast ast =
     (print_expression (spaces+1) exp1) ^
     (print_expression (spaces+1) exp2) ^
     (print_expression (spaces+1) exp3))
+    | FunctionCallExp (fname, exps) -> ((String.make spaces ' ') ^ "Function call:\n" ^
+    (List.fold_left (fun acc exp -> acc ^ (print_expression (spaces+1) exp)) "" exps))
   in
   let print_expression_option spaces exp_opt =
     match exp_opt with
@@ -144,22 +147,43 @@ let print_ast ast =
     | StatementItem st -> (String.make spaces ' ') ^ "StatementItem:\n" ^ (print_statement (spaces+1) st)
     | DeclareItem decl -> (String.make spaces ' ') ^ "DeclareItem:\n" ^ (print_declare (spaces+1) decl)
   in
+  let print_params params =
+    List.fold_left (fun acc param -> acc ^ param ^ ",") "" params
+  in
   let print_function spaces f =
-    let print_statements spaces statements=
-      List.fold_left (fun acc st -> acc ^ (print_block_item spaces st)) "" statements
+    let print_statements spaces sts_opt =
+      match sts_opt with
+      | None -> "Empty Statements (Function declaration only.)"
+      | Some statements ->
+          List.fold_left (fun acc st -> acc ^ (print_block_item spaces st)) "" statements
     in
     match f with
-    | IntFunction (a, sts) -> (String.make spaces ' ') ^ "Function " ^ a ^ ": \n" ^ (print_statements (spaces+1) sts)
+    | IntFunction (a, params, sts) -> ((String.make spaces ' ') ^ "Function " ^ a ^
+    ": , Params: " ^ (print_params params) ^ "\n" ^ (print_statements (spaces+1) sts))
   in
   match ast with
-  | Program f -> "Program: \n" ^ (print_function 1 f)
+  | Program fns -> "Program: \n" ^ (List.fold_left (fun acc f -> acc ^ (print_function 1 f) ^ "\n") "" fns)
 
 let rec parse_factor tokens =
   (* Parses a factor. *)
+  let rec parse_call_params acc tokens =
+    match tokens with
+    | [] -> fail "saw empty tokens in parse_call_params."
+    | RightParentheses :: r -> (List.rev acc), r
+    | Comma :: r -> let exp, r2 = parse_expression r in
+    parse_call_params (exp :: acc) r2
+    | a -> let exp, r = parse_expression a in
+    parse_call_params (exp :: acc) r
+  in
   match tokens with
   | [] -> fail "Empty expression."
   | IntegerLiteral a :: r -> ConstantIntExp (int_of_string a), r
-  | Identifier (a) :: r -> VarExp (a), r
+  | Identifier(a) :: r ->
+      (match r with
+      | LeftParentheses :: r2 ->
+          let params, r3 = parse_call_params [] r2 in
+          FunctionCallExp(a, params), r3
+      | r2 -> VarExp (a), r2)
   | Negation :: r ->
       (let exp, left = parse_factor r in
       NegateOp exp, left)
@@ -403,22 +427,40 @@ and parse_block_items acc tokens =
 
 (* Parses tokens to get a function, returns the function and the remaining tokens. *)
 and parse_function tokens =
+  let rec parse_parameters acc tokens =
+    match tokens with
+    | IntKeyword :: Identifier(a) :: r -> parse_parameters (a :: acc) r
+    | Comma :: IntKeyword :: Identifier(a) :: r -> parse_parameters (a :: acc) r
+    | RightParentheses :: r -> (List.rev acc), tokens
+    | a :: _ -> fail ("Unexpected token in parse_parameters: " ^ (print_token a))
+  in
   match tokens with
   | [] -> fail "Empty function."
-  | IntKeyword :: MainKeyword :: LeftParentheses :: RightParentheses:: LeftBrace :: r ->
-      let statements, left = parse_block_items [] r in
-      IntFunction ("main", statements), left
-  | IntKeyword :: Identifier (a) :: LeftParentheses :: RightParentheses:: LeftBrace :: r ->
-      let statements, left = parse_block_items [] r in
-      IntFunction (a, statements), left
+  | IntKeyword :: MainKeyword :: LeftParentheses ::  r ->
+      let params, r = parse_parameters [] r in
+      let r = consume_token RightParentheses r in
+      let r = consume_token LeftBrace r in
+      let statements, r = parse_block_items [] r in
+      IntFunction ("main", params, Some statements), r
+  | IntKeyword :: Identifier (fname) :: LeftParentheses :: r ->
+      let params, r = parse_parameters [] r in
+      let r = consume_token RightParentheses r in
+      let r = consume_token LeftBrace r in
+      let statements, r = parse_block_items [] r in
+      IntFunction (fname, params, Some statements), r
   | a :: r -> fail ("Unexpected token in parse_function: " ^ (print_token a))
+
+let rec parse_functions acc tokens =
+  match tokens with
+  | [] -> (List.rev acc), tokens
+  | a -> let f, r = parse_function a in parse_functions (f :: acc) r
 
 (* Parses tokens to get a program, returns the program and possibly remaining tokens. *)
 let parse_program tokens =
   match tokens with
   | [] -> fail "Empty program."
-  | a -> let func, r = parse_function a in
-  Program func, r
+  | a -> let functions, r = parse_functions [] a in
+  Program functions, r
 
   (* Parses tokens to get the AST in program_t. *)
 let get_ast tokens =

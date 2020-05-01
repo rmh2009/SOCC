@@ -20,6 +20,21 @@ let generate_assembly ast =
   let buf = Buffer.create 32 in
   let count = ref 0 in
   let rec generate_expression var_map exp =
+    let rec generate_f_call var_map fname exps =
+      let new_var_map = 
+      match exps with
+        | [] -> 
+          Buffer.add_string buf ("call    _" ^ fname ^ "\n");
+          var_map
+        | a :: r -> 
+          generate_expression var_map a;
+          Buffer.add_string buf "push   %eax\n";
+          generate_f_call var_map fname r
+      in
+      Buffer.add_string buf ("addl    $" ^ (string_of_int ( 4 * (List.length exps))) ^ ", %esp\n");
+      new_var_map;
+    in
+
     let generate_relational_expression buf command exp1 exp2=
       generate_expression var_map exp1;
       Buffer.add_string buf "push    %eax\n";
@@ -36,6 +51,9 @@ let generate_assembly ast =
             | Some offset ->
                 Buffer.add_string buf ("movl  " ^ (string_of_int offset) ^ "(%ebp),  %eax\n"))
         | ConstantIntExp n -> Buffer.add_string buf ("movl    $" ^ (string_of_int n) ^ ", %eax\n" )
+        | FunctionCallExp(fname, exps) ->
+            generate_f_call var_map fname exps;
+            ()
         | NegateOp exp ->
             generate_expression var_map exp;
             Buffer.add_string buf "neg    %eax\n"
@@ -293,6 +311,19 @@ let generate_assembly ast =
     (* index is the next available offset to esp to save new local variables, at the
      * beginning of a function, the index is one word (4 bytes) after the esp register. *)
 
+    let rec generate_f_var_map var_map fname params index =
+      match params with
+      | [] -> var_map
+      | a :: r  ->
+          generate_f_var_map {
+            vars = VarMap.add a index var_map.vars;
+            cur_scope_vars = var_map.cur_scope_vars;
+            index = var_map.index;
+            break_label = "";
+            continue_label = "";
+          } fname r (index+4)
+    in
+
   let var_map = {
     vars = VarMap.empty;
     cur_scope_vars = VarMap.empty;
@@ -300,17 +331,20 @@ let generate_assembly ast =
     break_label = "";
     continue_label = ""} in
     match f with
-    | IntFunction (fname, items) -> 
-        Buffer.add_string buf ("_" ^ fname ^ ":\n");
-        (* Saving the previous stack start point and use esp as the new stack start. *)
-        Buffer.add_string buf "push    %ebp\nmovl    %esp, %ebp\n";
-        generate_block_statements var_map items
+    | IntFunction (fname, params, items_opt) -> 
+        (match items_opt with
+        | None -> var_map
+        | Some items -> Buffer.add_string buf ("_" ^ fname ^ ":\n");
+          (* Saving the previous stack start point and use esp as the new stack start. *)
+          Buffer.add_string buf "push    %ebp\nmovl    %esp, %ebp\n";
+          let var_map = generate_f_var_map var_map fname params 8 in
+          generate_block_statements var_map items)
   in
 
   Buffer.add_string buf ".globl _main\n";
-  (match ast with
-  | Program f ->
-      generate_function f);
+  match ast with
+  | Program fns ->
+      List.iter (fun f -> generate_function f;()) fns;
   Buffer.contents buf
 
 let _ =

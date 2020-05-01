@@ -73,6 +73,7 @@ run_test "continue_in_for_loop2_expect_15.cc" 15
 run_test "continue_in_for_loop_expect_15.cc" 15
 run_test "continue_inner_loop_expect_15.cc" 15
 run_test "for_nested_for_loops_expect_60.cc" 60
+run_test "function_call_test1_expect_19.cc" 19
 }
 
 echo "Running all unit tests."

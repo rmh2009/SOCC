@@ -34,6 +34,7 @@ type token_t =
   | DoKeyword
   | BreakKeyword
   | ContinueKeyword
+  | Comma
 
 let read_file_content file_name =
   let file = open_in file_name in
@@ -84,6 +85,7 @@ let print_token token =
   | DoKeyword -> "Do"
   | BreakKeyword -> "Break"
   | ContinueKeyword -> "Continue"
+  | Comma -> "Comma"
 
 exception LexerError of string
 
@@ -133,6 +135,7 @@ let parse_tokens content =
     | ')' -> RightParentheses, i+1
     | ';' -> Semicolon, i+1
     | '-' -> Negation, i+1
+    | ',' -> Comma, i+1
     | '!' ->
         if (String.get content (i+1)) = '=' then NotEqual, i+2
         else LogicalNegation, i+1 

@@ -19,12 +19,29 @@ type var_map_t = {
 let generate_assembly ast =
   let buf = Buffer.create 32 in
   let count = ref 0 in
+
+  (* Hacky solution per Nora's article to add padding so that function stack is 16
+   * byte aligned. This is for MacOs only. *)
+  let add_function_call_padding num_args =
+    Buffer.add_string buf "movl    %esp, %eax\n";
+    Buffer.add_string buf ("subl $" ^ (string_of_int (4*(num_args+1)))^ ", %eax\n");
+    Buffer.add_string buf "xorl %edx, %edx\nmovl $0x20, %ecx\nidivl %ecx\n";
+    Buffer.add_string buf "subl %edx, %esp\npushl %edx\n";
+  in
+
+  let remove_function_call_padding () =
+    Buffer.add_string buf "popl %edx\naddl %edx, %esp\n";
+  in
+    
   let rec generate_expression var_map exp =
     let rec generate_f_call var_map fname exps num_args =
       match exps with
         | [] -> 
           Buffer.add_string buf ("call    _" ^ fname ^ "\n");
+          (* Function returned, remove arguments from stack. *)
           Buffer.add_string buf ("addl    $" ^ (string_of_int ( 4 * num_args)) ^ ", %esp\n");
+          (* Remove the padding *)
+          remove_function_call_padding ();
           var_map
         | a :: r -> 
           generate_expression var_map a;
@@ -49,6 +66,7 @@ let generate_assembly ast =
                 Buffer.add_string buf ("movl  " ^ (string_of_int offset) ^ "(%ebp),  %eax\n"))
         | ConstantIntExp n -> Buffer.add_string buf ("movl    $" ^ (string_of_int n) ^ ", %eax\n" )
         | FunctionCallExp(fname, exps) ->
+            add_function_call_padding (List.length exps);
             generate_f_call var_map fname exps (List.length exps);
             ()
         | NegateOp exp ->

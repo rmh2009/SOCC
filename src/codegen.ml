@@ -20,19 +20,16 @@ let generate_assembly ast =
   let buf = Buffer.create 32 in
   let count = ref 0 in
   let rec generate_expression var_map exp =
-    let rec generate_f_call var_map fname exps =
-      let new_var_map = 
+    let rec generate_f_call var_map fname exps num_args =
       match exps with
         | [] -> 
           Buffer.add_string buf ("call    _" ^ fname ^ "\n");
+          Buffer.add_string buf ("addl    $" ^ (string_of_int ( 4 * num_args)) ^ ", %esp\n");
           var_map
         | a :: r -> 
           generate_expression var_map a;
           Buffer.add_string buf "push   %eax\n";
-          generate_f_call var_map fname r
-      in
-      Buffer.add_string buf ("addl    $" ^ (string_of_int ( 4 * (List.length exps))) ^ ", %esp\n");
-      new_var_map;
+          generate_f_call var_map fname r num_args
     in
 
     let generate_relational_expression buf command exp1 exp2=
@@ -52,7 +49,7 @@ let generate_assembly ast =
                 Buffer.add_string buf ("movl  " ^ (string_of_int offset) ^ "(%ebp),  %eax\n"))
         | ConstantIntExp n -> Buffer.add_string buf ("movl    $" ^ (string_of_int n) ^ ", %eax\n" )
         | FunctionCallExp(fname, exps) ->
-            generate_f_call var_map fname exps;
+            generate_f_call var_map fname exps (List.length exps);
             ()
         | NegateOp exp ->
             generate_expression var_map exp;

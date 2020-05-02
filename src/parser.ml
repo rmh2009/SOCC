@@ -54,10 +54,10 @@ exception TokenError of string
 
 let fail message = raise (TokenError message)
 
-let peek tokens =
+let peek (tokens : token_t list) : token_t =
   match tokens with [] -> fail "No tokens left in peek tokens." | a :: _ -> a
 
-let consume_token token tokens =
+let consume_token (token : token_t) (tokens : token_t list) : token_t list =
   match tokens with
   | hd :: tl ->
       if hd = token then tl
@@ -70,7 +70,8 @@ let consume_token token tokens =
         ( "No tokens left in consuming tokens, expecting token: "
         ^ print_token token )
 
-let print_ast ast =
+(* Pretty prints an AST. *)
+let print_ast (ast : program_t) : string =
   let rec print_expression spaces exp =
     let rec print_binary spaces op exp1 exp2 =
       String.make spaces ' ' ^ op ^ " of \n"
@@ -214,7 +215,8 @@ let print_ast ast =
       "Program: \n"
       ^ List.fold_left (fun acc f -> acc ^ print_function 1 f ^ "\n") "" fns
 
-let rec parse_factor tokens =
+(* Parses a factor expression. *)
+let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
   (* Parses a factor. *)
   let rec parse_call_params acc tokens =
     match tokens with
@@ -252,7 +254,8 @@ let rec parse_factor tokens =
       | _ -> fail "Expecting RightParentheses." )
   | a :: r -> fail ("Unexpected token in parse_factor: " ^ print_token a)
 
-and parse_term tokens =
+(* Parses a term expression. *)
+and parse_term (tokens : token_t list) : expression_t * token_t list =
   (* Parses a term. *)
   let rec parse_term_rec previous_factor tokens =
     match tokens with
@@ -267,7 +270,9 @@ and parse_term tokens =
   let factor, left = parse_factor tokens in
   parse_term_rec factor left
 
-and parse_additive_expression tokens =
+(* Parses an additive expression. *)
+and parse_additive_expression (tokens : token_t list) :
+    expression_t * token_t list =
   let rec parse_expression_rec previous_term tokens =
     match tokens with
     | Addition :: r ->
@@ -281,7 +286,9 @@ and parse_additive_expression tokens =
   let term, left = parse_term tokens in
   parse_expression_rec term left
 
-and parse_relational_expression tokens =
+(* Parses a relational expression. *)
+and parse_relational_expression (tokens : token_t list) :
+    expression_t * token_t list =
   let rec parse_expression_rec previous_exp tokens =
     match tokens with
     | Less :: r ->
@@ -301,7 +308,9 @@ and parse_relational_expression tokens =
   let exp, left = parse_additive_expression tokens in
   parse_expression_rec exp left
 
-and parse_equality_expression tokens =
+(* Parses equality expression. *)
+and parse_equality_expression (tokens : token_t list) :
+    expression_t * token_t list =
   let rec parse_expression_rec previous_exp tokens =
     match tokens with
     | Equal :: r ->
@@ -315,7 +324,8 @@ and parse_equality_expression tokens =
   let exp, left = parse_relational_expression tokens in
   parse_expression_rec exp left
 
-and parse_logical_and_expression tokens =
+and parse_logical_and_expression (tokens : token_t list) :
+    expression_t * token_t list =
   let rec parse_expression_rec previous_exp tokens =
     match tokens with
     | And :: r ->
@@ -326,7 +336,8 @@ and parse_logical_and_expression tokens =
   let exp, left = parse_equality_expression tokens in
   parse_expression_rec exp left
 
-and parse_logical_or_expression tokens =
+and parse_logical_or_expression (tokens : token_t list) :
+    expression_t * token_t list =
   let rec parse_expression_rec previous_exp tokens =
     match tokens with
     | Or :: r ->
@@ -337,7 +348,8 @@ and parse_logical_or_expression tokens =
   let exp, left = parse_logical_and_expression tokens in
   parse_expression_rec exp left
 
-and parse_conditional_expression tokens =
+and parse_conditional_expression (tokens : token_t list) :
+    expression_t * token_t list =
   let first_exp, left = parse_logical_or_expression tokens in
   match left with
   | QuestionMark :: r -> (
@@ -350,7 +362,8 @@ and parse_conditional_expression tokens =
       | [] -> fail "Expecting Colon, but see end of file." )
   | _ -> (first_exp, left)
 
-and parse_expression tokens =
+(* Parses any one expression. *)
+and parse_expression (tokens : token_t list) : expression_t * token_t list =
   (* Parses an expression. *)
   match tokens with
   | Identifier a :: Assignment :: r ->
@@ -359,7 +372,8 @@ and parse_expression tokens =
   | l -> parse_conditional_expression l
 
 (* Returns expression Option. If the next token is Semi-colon will return None. *)
-let parse_expression_opt tokens =
+let parse_expression_opt (tokens : token_t list) :
+    expression_t option * token_t list =
   match tokens with
   | Semicolon :: _ -> (None, tokens)
   | RightParentheses :: _ -> (None, tokens)
@@ -368,7 +382,7 @@ let parse_expression_opt tokens =
       (Some exp, r)
 
 (* Does not consume the trailing Semicolon (if there is one). *)
-let rec parse_statement tokens =
+let rec parse_statement (tokens : token_t list) : statement_t * token_t list =
   let parse_expression_opt_or_declare tokens =
     if peek tokens = Semicolon then (None, None, tokens)
     else if peek tokens = IntKeyword then
@@ -427,8 +441,8 @@ let rec parse_statement tokens =
       let exp, left = parse_expression l in
       (ExpressionStatement (Some exp), left)
 
-(* Does not consume the trailing Semicolon. *)
-and parse_declare tokens =
+(* Parses a delcare statement. Does not consume the trailing Semicolon. *)
+and parse_declare (tokens : token_t list) : declare_t * token_t list =
   match tokens with
   | [] -> fail "Empty declare statement."
   | IntKeyword :: Identifier a :: Assignment :: r ->
@@ -439,7 +453,7 @@ and parse_declare tokens =
 
 (* Parses tokens to get a statement, returns the statement and the remaining tokens. *)
 (* This function consumes the trailing ; if it exists. *)
-and parse_block_item tokens =
+and parse_block_item (tokens : token_t list) : block_item_t * token_t list =
   let result, r =
     match tokens with
     | [] -> fail "Empty statement or declare statement."
@@ -464,7 +478,8 @@ and parse_block_item tokens =
   | StatementItem (DoStatement _) -> (result, r)
   | _ -> (result, consume_token Semicolon r)
 
-and parse_block_items acc tokens =
+and parse_block_items (acc : block_item_t list) (tokens : token_t list) :
+    block_item_t list * token_t list =
   match tokens with
   | RightBrace :: r -> (List.rev acc, r)
   | l ->
@@ -472,14 +487,14 @@ and parse_block_items acc tokens =
       parse_block_items (statement :: acc) left
 
 (* Parses tokens to get a function, returns the function and the remaining tokens. *)
-and parse_function tokens =
+and parse_function (tokens : token_t list) : function_t * token_t list =
   let rec parse_parameters acc tokens =
     match tokens with
     | IntKeyword :: Identifier a :: r -> parse_parameters (a :: acc) r
     | Comma :: IntKeyword :: Identifier a :: r -> parse_parameters (a :: acc) r
     | RightParentheses :: r -> (List.rev acc, tokens)
     | a :: _ -> fail ("Unexpected token in parse_parameters: " ^ print_token a)
-    | [] -> fail ("Expecting token or RightParentheses in parse_parameters.")
+    | [] -> fail "Expecting token or RightParentheses in parse_parameters."
   in
   match tokens with
   | [] -> fail "Empty function."
@@ -495,7 +510,9 @@ and parse_function tokens =
         (IntFunction (fname, params, Some statements), r)
   | a :: r -> fail ("Unexpected token in parse_function: " ^ print_token a)
 
-let rec parse_functions acc tokens =
+(* Parses all functions. *)
+let rec parse_functions (acc : function_t list) (tokens : token_t list) :
+    function_t list * token_t list =
   match tokens with
   | [] -> (List.rev acc, tokens)
   | a ->
@@ -503,7 +520,7 @@ let rec parse_functions acc tokens =
       parse_functions (f :: acc) r
 
 (* Parses tokens to get a program, returns the program and possibly remaining tokens. *)
-let parse_program tokens =
+let parse_program (tokens : token_t list) : program_t * token_t list =
   match tokens with
   | [] -> fail "Empty program."
   | a ->
@@ -511,6 +528,6 @@ let parse_program tokens =
       (Program functions, r)
 
 (* Parses tokens to get the AST in program_t. *)
-let get_ast tokens =
+let get_ast (tokens : token_t list) : program_t =
   let program, left_tokens = parse_program tokens in
   program

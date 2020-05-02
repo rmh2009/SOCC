@@ -9,4 +9,3 @@ let _ =
   Printf.printf "\nGenerated Code:\n%s\n" code;
   let oc = open_out "assembly.s" in
   Printf.fprintf oc "%s\n" code
-

@@ -20,20 +20,24 @@ type context_t = {
 
 (* Hacky solution per Nora's article to add padding so that function stack is 16
  * byte aligned. This is for MacOs only. *)
-let add_function_call_padding output num_args =
+let add_function_call_padding (output : string -> unit) (num_args : int) : unit
+    =
   output "movl    %esp, %eax\n";
   output ("subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
   output "xorl %edx, %edx\nmovl $0x20, %ecx\nidivl %ecx\n";
   output "subl %edx, %esp\npushl %edx\n"
 
-let remove_function_call_padding ctx = ctx.output "popl %edx\naddl %edx, %esp\n"
+let remove_function_call_padding (ctx : context_t) : unit =
+  ctx.output "popl %edx\naddl %edx, %esp\n"
 
-let generate_update_esp ctx var_map =
+let generate_update_esp (ctx : context_t) (var_map : var_map_t) : unit =
   ctx.output "movl    %ebp, %eax\n";
   ctx.output ("subl    $" ^ string_of_int (-var_map.index - 4) ^ ",  %eax\n");
   ctx.output "movl    %eax, %esp\n"
 
-let rec generate_expression ctx var_map exp =
+(* Generates the assembly code for a specific expression. *)
+let rec generate_expression (ctx : context_t) (var_map : var_map_t)
+    (exp : expression_t) : unit =
   let output = ctx.output in
   let get_unique_label = ctx.get_unique_label in
   let rec generate_f_call var_map fname exps num_args =
@@ -154,10 +158,14 @@ let rec generate_expression ctx var_map exp =
           generate_expression ctx var_map exp;
           output ("movl  %eax, " ^ string_of_int offset ^ "(%ebp)\n") )
 
-let update_break_continue_label var_map break continue =
+(* Updates the continue_label and break_label fields in the given var_map. *)
+let update_break_continue_label (var_map : var_map_t) (break : string)
+    (continue : string) : var_map_t =
   { var_map with continue_label = continue; break_label = break }
 
-let rec generate_block_item ctx var_map st =
+(* Generates assmebly code for a block item. *)
+let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
+    (st : block_item_t) : var_map_t =
   let output = ctx.output in
   let get_unique_label = ctx.get_unique_label in
   match st with
@@ -328,10 +336,12 @@ let rec generate_block_item ctx var_map st =
             index = var_map.index - 4;
           } )
 
-and generate_block_statements ctx var_map sts =
+(* Generates the assembly code for a list of block items. *)
+and generate_block_statements (ctx : context_t) (var_map : var_map_t)
+    (sts : block_item_t list) : var_map_t =
   List.fold_left (generate_block_item ctx) var_map sts
 
-let generate_function ctx f =
+let generate_function (ctx : context_t) (f : function_t) : var_map_t =
   let output = ctx.output in
 
   (* index is the next available offset to esp to save new local variables, at the
@@ -374,7 +384,7 @@ let generate_function ctx f =
           generate_block_statements ctx var_map items )
 
 (* Generates the assembly code as a string given the ast in Parser.program_t type. *)
-let generate_assembly ast =
+let generate_assembly (ast : program_t) : string =
   let buf = Buffer.create 32 in
   let count = ref 0 in
   let ctx =
@@ -383,9 +393,6 @@ let generate_assembly ast =
       get_unique_label = get_unique_label count;
     }
   in
-
-  (* This is used to update the stack top pointer %esp after break/continue. This will always
-   * be on top of the current var_map.index.*)
   ctx.output ".globl _main\n";
   match ast with
   | Program fns ->

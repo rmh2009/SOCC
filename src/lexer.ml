@@ -35,7 +35,7 @@ type token_t =
   | ContinueKeyword
   | Comma
 
-let read_file_content file_name =
+let read_file_content (file_name : string) : string =
   let file = open_in file_name in
   let buf = Buffer.create (in_channel_length file) in
   try
@@ -47,7 +47,7 @@ let read_file_content file_name =
     assert false
   with End_of_file -> Buffer.contents buf
 
-let print_token token =
+let print_token (token : token_t) : string =
   match token with
   | IntKeyword -> "IntKeyword"
   | LeftParentheses -> "LeftParentheses"
@@ -87,15 +87,16 @@ let print_token token =
 
 exception LexerError of string
 
-let is_number c = if c >= '0' && c <= '9' then true else false
+let is_number (c : char) : bool = if c >= '0' && c <= '9' then true else false
 
-let is_alpha c =
+let is_alpha (c : char) : bool =
   if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') then true else false
 
-let is_alphanumeric c = if is_alpha c || is_number c then true else false
+let is_alphanumeric (c : char) : bool =
+  if is_alpha c || is_number c then true else false
 
-(* Parses a string content and get a list of tokens *)
-let parse_tokens content =
+(* Parses a string content and get a list of tokens. *)
+let parse_tokens (content : string) : token_t list =
   let parse_keyword_identifier_literal content i =
     let rec parse_word acc content i =
       if i >= String.length content then (acc, i)

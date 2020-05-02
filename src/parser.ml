@@ -97,7 +97,7 @@ let print_ast ast =
     (print_expression (spaces+1) exp1) ^
     (print_expression (spaces+1) exp2) ^
     (print_expression (spaces+1) exp3))
-    | FunctionCallExp (fname, exps) -> ((String.make spaces ' ') ^ "Function call:\n" ^
+    | FunctionCallExp (fname, exps) -> ((String.make spaces ' ') ^ "Function call -> " ^ fname ^ "\n" ^
     (List.fold_left (fun acc exp -> acc ^ (print_expression (spaces+1) exp)) "" exps))
   in
   let print_expression_option spaces exp_opt =
@@ -153,7 +153,7 @@ let print_ast ast =
   let print_function spaces f =
     let print_statements spaces sts_opt =
       match sts_opt with
-      | None -> "Empty Statements (Function declaration only.)"
+      | None -> (String.make spaces ' ' ) ^ "Empty Statements (Function declaration only.)"
       | Some statements ->
           List.fold_left (fun acc st -> acc ^ (print_block_item spaces st)) "" statements
     in
@@ -436,18 +436,17 @@ and parse_function tokens =
   in
   match tokens with
   | [] -> fail "Empty function."
-  | IntKeyword :: MainKeyword :: LeftParentheses ::  r ->
-      let params, r = parse_parameters [] r in
-      let r = consume_token RightParentheses r in
-      let r = consume_token LeftBrace r in
-      let statements, r = parse_block_items [] r in
-      IntFunction ("main", params, Some statements), r
   | IntKeyword :: Identifier (fname) :: LeftParentheses :: r ->
       let params, r = parse_parameters [] r in
       let r = consume_token RightParentheses r in
-      let r = consume_token LeftBrace r in
-      let statements, r = parse_block_items [] r in
-      IntFunction (fname, params, Some statements), r
+      if peek r = Semicolon then (
+        let r = consume_token Semicolon r in
+        IntFunction (fname, params, None), r
+      ) else (
+        let r = consume_token LeftBrace r in
+        let statements, r = parse_block_items [] r in
+        IntFunction (fname, params, Some statements), r
+      )
   | a :: r -> fail ("Unexpected token in parse_function: " ^ (print_token a))
 
 let rec parse_functions acc tokens =

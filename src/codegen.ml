@@ -326,6 +326,7 @@ let generate_assembly ast =
     (* index is the next available offset to esp to save new local variables, at the
      * beginning of a function, the index is one word (4 bytes) after the esp register. *)
 
+    (* Generates the var_map with the references to the function arguments. *)
     let rec generate_f_var_map var_map fname params index =
       match params with
       | [] -> var_map

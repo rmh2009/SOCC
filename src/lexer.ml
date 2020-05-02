@@ -1,6 +1,5 @@
 type token_t = 
-  MainKeyword 
-  | IntKeyword 
+  IntKeyword 
   | LeftParentheses 
   | RightParentheses 
   | LeftBrace 
@@ -50,7 +49,6 @@ let read_file_content file_name =
 
 let print_token token =
   match token with
-  | MainKeyword -> "MainKeyword"
   | IntKeyword -> "IntKeyword"
   | LeftParentheses -> "LeftParentheses"
   | RightParentheses -> "RightParentheses"
@@ -112,8 +110,7 @@ let parse_tokens content =
         else (acc, i)
         in
     let word, loc = parse_word "" content i in
-    if word = "main" then MainKeyword, loc
-    else if word = "int" then IntKeyword, loc
+    if word = "int" then IntKeyword, loc
     else if word = "return" then ReturnKeyword, loc
     else if word = "if" then IfKeyword, loc
     else if word = "else" then ElseKeyword, loc

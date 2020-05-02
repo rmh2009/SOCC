@@ -10,7 +10,7 @@ compile_code() {
     echo "Failed to copy file test/$cc_file"
     exit 1
   fi
-  ocamlopt -o cc_ocaml ../src/lexer.ml ../src/parser.ml ../src/util.ml ../src/codegen.ml
+  ocamlopt -o cc_ocaml ../src/lexer.ml ../src/parser.ml ../src/util.ml ../src/codegen.ml ../src/main.ml
   ret=$?
   if [[ $ret -ne 0 ]]; then
     echo "Compiling failed."
@@ -27,7 +27,7 @@ run_code() {
     "Failed to compile assembly into machine code."
     exit 1
   fi
-  ./out
+  ./out > std_output.txt
 }
 
 failed_tests=""
@@ -35,12 +35,20 @@ failed_tests=""
 run_test()  {
   cc_file=$1
   result=$2
+  expected_output=$3
   compile_code $cc_file
   run_code
   actual_result=$?
+  std_output=$(cat std_output.txt)
   if [ $actual_result != $result ]; then
     echo "*********** ( Failed testing $cc_file, expecting $result, actual $actual_result ) "
     failed_tests="$failed_tests ( Failed testing $cc_file, expecting $result, actual $actual_result ) "
+  fi
+  if [ $expected_output != "" ]; then
+    if [ $expected_output != "$std_output" ]; then
+      echo "*********** ( Failed testing $cc_file, expecting std output $expected_output, actual $std_output ) "
+      failed_tests="$failed_tests ( Failed testing $cc_file, expecting std output $expected_output, actual $std_output ) "
+    fi
   fi
   echo "************ Test passed for $cc_file"
 }
@@ -76,6 +84,7 @@ run_test "for_nested_for_loops_expect_60.cc" 60
 run_test "function_call_test1_expect_19.cc" 19
 run_test "function_call_test2_expect_21.cc" 21
 run_test "function_call_test_fibonacci_expect_5.cc" 5
+run_test "print_hello_world.cc" 0 "Hello, World!"
 }
 
 echo "Running all unit tests."

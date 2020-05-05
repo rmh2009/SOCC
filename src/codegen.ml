@@ -69,6 +69,7 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
       | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
       | Some offset ->
           output ("movl  " ^ string_of_int offset ^ "(%ebp),  %eax\n") )
+  | ArrayIndexExp(_,_) -> raise (CodeGenError "Array index unimplemented")
   | ConstantIntExp n -> output ("movl    $" ^ string_of_int n ^ ", %eax\n")
   | FunctionCallExp (fname, exps) ->
       add_function_call_padding output (List.length exps);
@@ -84,6 +85,9 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
       generate_expression ctx var_map exp;
       output "not    %eax\n"
   | GroupedExpression exp -> generate_expression ctx var_map exp
+  | ConstantCharExp(a)  -> raise (CodeGenError "Char nimplemented")
+  | ConstantStringExp(a) -> raise (CodeGenError "String unimplemented")
+  | ConstantFloatExp(a) -> raise (CodeGenError "Float unimplemented")
   | AdditionExp (exp1, exp2) ->
       generate_expression ctx var_map exp1;
       output "push    %eax\n";
@@ -151,12 +155,16 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
       output (cond_label ^ ":\n");
       generate_expression ctx var_map exp3;
       output (cond_end_label ^ ":\n")
-  | AssignExp (a, exp) -> (
+  | AssignExp (VarExp a, exp) -> (
       match VarMap.find_opt a var_map.vars with
       | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
       | Some offset ->
           generate_expression ctx var_map exp;
           output ("movl  %eax, " ^ string_of_int offset ^ "(%ebp)\n") )
+  | AssignExp (ArrayIndexExp (exp1, exp2), exp_r) ->
+      CodeGenError "Array assignment not supported yet!." |> raise
+  | AssignExp (_, _) ->
+      CodeGenError "Left hand side is not assignable!" |> raise
 
 (* Updates the continue_label and break_label fields in the given var_map. *)
 let update_break_continue_label (var_map : var_map_t) (break : string)
@@ -319,7 +327,14 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
         ^ string_of_int (4 * VarMap.cardinal inner_var_map.cur_scope_vars)
         ^ ", %esp\n" );
       var_map
-  | DeclareItem (DeclareStatement (a, exp_opt)) -> (
+  | DeclareItem (DeclareStatement (data_type, a, exp_opt)) -> (
+      let rec get_data_size (t : data_type_t) : int =
+        match t with
+        | IntType -> 4
+        | ArrayType (t2, sizes) ->
+            List.fold_left (fun acc a -> acc * a) 1 sizes * get_data_size t2
+        | _ -> raise (CodeGenError "Unsupported data type.")
+      in
       ( match exp_opt with
       | None -> output "movl    $0, %eax\n"
       | Some exp -> generate_expression ctx var_map exp );
@@ -333,7 +348,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
             var_map with
             vars = VarMap.add a var_map.index var_map.vars;
             cur_scope_vars = VarMap.add a var_map.index var_map.cur_scope_vars;
-            index = var_map.index - 4;
+            index = var_map.index - get_data_size data_type;
           } )
 
 (* Generates the assembly code for a list of block items. *)

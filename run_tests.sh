@@ -85,6 +85,10 @@ run_test "function_call_test1_expect_19.cc" 19
 run_test "function_call_test2_expect_21.cc" 21
 run_test "function_call_test_fibonacci_expect_5.cc" 5
 run_test "print_hello_world.cc" 0 "Hello, World!"
+
+run_test "array_test1_expect_4.cc" 4
+run_test "array_2d_test_expect_4.cc" 4
+run_test "array_2d_test_expect2_18.cc" 18
 }
 
 echo "Running all unit tests."

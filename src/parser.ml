@@ -7,6 +7,7 @@ type data_type_t =
   | CharType
   | ArrayType of data_type_t * int list
   | PointerType of data_type_t
+  | UnknownType
 
 let rec print_data_type (t : data_type_t) : string =
   match t with
@@ -18,6 +19,7 @@ let rec print_data_type (t : data_type_t) : string =
       print_data_type t ^ " sizes: "
       ^ List.fold_left (fun acc a -> acc ^ string_of_int a ^ ",") "" sizes
   | PointerType t -> "pointer of " ^ print_data_type t
+  | UnknownType -> "UnknownType"
 
 (* Expression is further decomposed into factors and terms. Factor is the smallest group
  * consisting of constants, unary operator or grouped expressions.
@@ -79,6 +81,13 @@ let is_assignable (exp : expression_t) : bool =
   match exp with VarExp _ -> true | ArrayIndexExp (_, _) -> true | _ -> false
 
 let fail message = raise (TokenError message)
+
+let rec get_data_size (t : data_type_t) : int =
+  match t with
+  | IntType -> 4
+  | ArrayType (t2, sizes) ->
+      List.fold_left (fun acc a -> acc * a) 1 sizes * get_data_size t2
+  | _ -> fail "Unsupported data type."
 
 let peek (tokens : token_t list) : token_t =
   match tokens with [] -> fail "No tokens left in peek tokens." | a :: _ -> a

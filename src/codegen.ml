@@ -6,8 +6,8 @@ module VarMap = Map.Make (String)
 exception CodeGenError of string
 
 type var_map_t = {
-  vars : int VarMap.t;
-  cur_scope_vars : int VarMap.t;
+  vars : (int * data_type_t) VarMap.t;
+  cur_scope_vars : (int * data_type_t) VarMap.t;
   index : int;
   break_label : string;
   continue_label : string;
@@ -37,7 +37,7 @@ let generate_update_esp (ctx : context_t) (var_map : var_map_t) : unit =
 
 (* Generates the assembly code for a specific expression. *)
 let rec generate_expression (ctx : context_t) (var_map : var_map_t)
-    (exp : expression_t) : unit =
+    (exp : expression_t) : data_type_t =
   let output = ctx.output in
   let get_unique_label = ctx.get_unique_label in
   let rec generate_f_call var_map fname exps num_args =
@@ -49,70 +49,106 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
         (* Remove the padding *)
         remove_function_call_padding ctx
     | a :: r ->
-        generate_expression ctx var_map a;
+        generate_expression ctx var_map a |> ignore;
         ctx.output "push   %eax\n";
         generate_f_call var_map fname r num_args
   in
 
-  let generate_relational_expression output command exp1 exp2 =
-    generate_expression ctx var_map exp1;
+  let generate_relational_expression output command exp1 exp2 : data_type_t =
+    generate_expression ctx var_map exp1 |> ignore;
     output "push    %eax\n";
-    generate_expression ctx var_map exp2;
+    generate_expression ctx var_map exp2 |> ignore;
     output "pop    %ecx\n";
     output "cmpl   %eax, %ecx\n";
     output "movl   $0, %eax\n";
-    output (command ^ "   %al\n")
+    output (command ^ "   %al\n");
+    IntType
   in
   match exp with
   | VarExp a -> (
       match VarMap.find_opt a var_map.vars with
       | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
-      | Some offset ->
-          output ("movl  " ^ string_of_int offset ^ "(%ebp),  %eax\n") )
-  | ArrayIndexExp(_,_) -> raise (CodeGenError "Array index unimplemented")
-  | ConstantIntExp n -> output ("movl    $" ^ string_of_int n ^ ", %eax\n")
+      | Some (offset, t) ->
+          ( match t with
+          | IntType ->
+              output ("movl  " ^ string_of_int offset ^ "(%ebp),  %eax\n")
+          | ArrayType (_, _) ->
+              output "movl    %ebp, %eax\n";
+              output ("addl  $" ^ (string_of_int offset) ^ ", %eax\n");
+          | x -> CodeGenError ("Unsupported type in VarExp." ^ (print_data_type x)) |> raise );
+          t )
+  | ArrayIndexExp (exp1, exp2) -> (
+      (* exp1 must be of type Array, in the current implementation types are evaluated
+       * during code generation, the evaluation result and step size also depends on
+       * the type of exp1, so we need to evaluate exp1 first.*)
+      let t = generate_expression ctx var_map exp1 in
+      let (ArrayType (data_type, sizes)) = t in
+      output "pushl    %eax # index array addr\n";
+      let t2 = generate_expression ctx var_map exp2 in
+      output ("imul    $" ^ (string_of_int (get_data_size data_type)) ^ ", %eax # nidex array index\n");
+      output "popl    %ecx\n";
+      output "subl    %eax, %ecx\n";
+      output "movl    %ecx, %eax\n";
+      if List.length sizes = 1 then output "movl    (%eax), %eax# index array end (value)\n"
+      else output " # index array end (addr, already in eax)\n";
+      match sizes with
+      | hd :: tl -> ArrayType (data_type, tl)
+      | [ hd ] -> data_type
+      | [] -> CodeGenError "ArrayType can not have empty dimension!" |> raise )
+  | ConstantIntExp n ->
+      output ("movl    $" ^ string_of_int n ^ ", %eax\n");
+      IntType
   | FunctionCallExp (fname, exps) ->
       add_function_call_padding output (List.length exps);
       generate_f_call var_map fname exps (List.length exps);
-      ()
+      (* TODO assume function always return int. *)
+      IntType
   | NegateOp exp ->
-      generate_expression ctx var_map exp;
-      output "neg    %eax\n"
+      generate_expression ctx var_map exp |> ignore;
+      output "neg    %eax\n";
+      IntType
   | LogicalNegateOp exp ->
-      generate_expression ctx var_map exp;
-      output "cmpl    $0, %eax\nmovl     $0, %eax\nsete    %al\n"
+      generate_expression ctx var_map exp |> ignore;
+      output "cmpl    $0, %eax\nmovl     $0, %eax\nsete    %al\n";
+      IntType
   | ComplementOp exp ->
-      generate_expression ctx var_map exp;
-      output "not    %eax\n"
+      generate_expression ctx var_map exp |> ignore;
+      output "not    %eax\n";
+      IntType
   | GroupedExpression exp -> generate_expression ctx var_map exp
-  | ConstantCharExp(a)  -> raise (CodeGenError "Char nimplemented")
-  | ConstantStringExp(a) -> raise (CodeGenError "String unimplemented")
-  | ConstantFloatExp(a) -> raise (CodeGenError "Float unimplemented")
+  | ConstantCharExp a -> raise (CodeGenError "Char nimplemented")
+  | ConstantStringExp a -> raise (CodeGenError "String unimplemented")
+  | ConstantFloatExp a -> raise (CodeGenError "Float unimplemented")
   | AdditionExp (exp1, exp2) ->
-      generate_expression ctx var_map exp1;
+      generate_expression ctx var_map exp1 |> ignore;
       output "push    %eax\n";
-      generate_expression ctx var_map exp2;
+      let t = generate_expression ctx var_map exp2 in
       output "pop    %ecx\n";
-      output "addl    %ecx, %eax\n"
+      output "addl    %ecx, %eax\n";
+      t
   | MinusExp (exp1, exp2) ->
-      generate_expression ctx var_map exp2;
+      generate_expression ctx var_map exp2 |> ignore;
       output "push    %eax\n";
-      generate_expression ctx var_map exp1;
+      let t = generate_expression ctx var_map exp1 in
       output "pop    %ecx\n";
-      output "subl    %ecx, %eax\n"
+      output "subl    %ecx, %eax\n";
+
+      t
   | MultiExp (exp1, exp2) ->
-      generate_expression ctx var_map exp1;
+      generate_expression ctx var_map exp1 |> ignore;
       output "push    %eax\n";
-      generate_expression ctx var_map exp2;
+      let t = generate_expression ctx var_map exp2 in
       output "pop    %ecx\n";
-      output "imul    %ecx, %eax\n"
+      output "imul    %ecx, %eax\n";
+      t
   | DivideExp (exp1, exp2) ->
-      generate_expression ctx var_map exp2;
+      generate_expression ctx var_map exp2 |> ignore;
       output "push    %eax\n";
-      generate_expression ctx var_map exp1;
+      let t = generate_expression ctx var_map exp1 in
       output "cdq\n";
       output "pop    %ecx\n";
-      output "idvl    %ecx\n"
+      output "idvl    %ecx\n";
+      t
   | EqualExp (exp1, exp2) ->
       generate_relational_expression output "sete" exp1 exp2
   | NotEqualExp (exp1, exp2) ->
@@ -126,43 +162,64 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
   | LessExp (exp1, exp2) ->
       generate_relational_expression output "setl" exp1 exp2
   | OrExp (exp1, exp2) ->
-      generate_expression ctx var_map exp1;
+      generate_expression ctx var_map exp1 |> ignore;
       let clause_label = get_unique_label "_clause2" in
       let end_label = get_unique_label "_end" in
       output ("cmpl    $0, %eax\nje " ^ clause_label ^ "\n");
       output ("movl    $1, %eax\njmp " ^ end_label ^ "\n");
       output (clause_label ^ ":\n");
-      generate_expression ctx var_map exp2;
+      generate_expression ctx var_map exp2 |> ignore;
       output "cmpl    $0, %eax\nmovl    $0, %eax\nsetne    %al\n";
-      output (end_label ^ ":\n")
+      output (end_label ^ ":\n");
+      IntType
   | AndExp (exp1, exp2) ->
-      generate_expression ctx var_map exp1;
+      generate_expression ctx var_map exp1 |> ignore;
       let clause_label = get_unique_label "_clause2" in
       let end_label = get_unique_label "_end" in
       output ("cmpl    $0, %eax\njne " ^ clause_label ^ "\n");
       output ("movl    $0, %eax\njmp " ^ end_label ^ "\n");
       output (clause_label ^ ":\n");
-      generate_expression ctx var_map exp2;
+      generate_expression ctx var_map exp2 |> ignore;
       output "cmpl    $0, %eax\nmovl    $0, %eax\nsetne    %al\n";
-      output (end_label ^ ":\n")
+      output (end_label ^ ":\n");
+      IntType
   | ConditionExp (exp1, exp2, exp3) ->
-      generate_expression ctx var_map exp1;
+      generate_expression ctx var_map exp1 |> ignore;
       let cond_label = get_unique_label "_cond" in
       let cond_end_label = get_unique_label "_condend" in
       output ("cmpl    $0, %eax\nje    " ^ cond_label ^ "\n");
-      generate_expression ctx var_map exp2;
+      let t = generate_expression ctx var_map exp2 in
       output ("jmp    " ^ cond_end_label ^ "\n");
       output (cond_label ^ ":\n");
-      generate_expression ctx var_map exp3;
-      output (cond_end_label ^ ":\n")
+      generate_expression ctx var_map exp3 |> ignore;
+      output (cond_end_label ^ ":\n");
+      t
   | AssignExp (VarExp a, exp) -> (
       match VarMap.find_opt a var_map.vars with
       | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
-      | Some offset ->
-          generate_expression ctx var_map exp;
-          output ("movl  %eax, " ^ string_of_int offset ^ "(%ebp)\n") )
+      | Some (offset, t) ->
+          let t = generate_expression ctx var_map exp in
+          output ("movl  %eax, " ^ string_of_int offset ^ "(%ebp)\n");
+          t )
   | AssignExp (ArrayIndexExp (exp1, exp2), exp_r) ->
-      CodeGenError "Array assignment not supported yet!." |> raise
+      let t = generate_expression ctx var_map exp1 in
+      output "pushl    %eax # array assign addr\n";
+      (match t with
+      | ArrayType (element_type, sizes) ->
+          if List.length sizes <> 1 then raise (CodeGenError("Only 1-D array is assignable."))
+          else 
+            generate_expression ctx var_map exp2;
+            (* TODO change this to calculate step size. *)
+            output "imul    $4, %eax  # array assign index\n";
+            output "popl    %ecx\n";
+            output "subl    %eax, %ecx\n";
+            output "pushl    %ecx\n";
+            generate_expression ctx var_map exp_r |> ignore;
+            output "popl    %ecx\n";
+            output "movl    %eax, (%ecx) # array assign end\n";
+            element_type
+      | a -> CodeGenError("Type is not assignable: " ^ print_data_type (a)) |> raise )
+
   | AssignExp (_, _) ->
       CodeGenError "Left hand side is not assignable!" |> raise
 
@@ -178,18 +235,18 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
   let get_unique_label = ctx.get_unique_label in
   match st with
   | StatementItem (ReturnStatement exp) ->
-      generate_expression ctx var_map exp;
+      generate_expression ctx var_map exp |> ignore;
       output "movl    %ebp, %esp\npop    %ebp\n";
       output "ret\n";
       var_map
   | StatementItem (ExpressionStatement (Some exp)) ->
-      generate_expression ctx var_map exp;
+      generate_expression ctx var_map exp |> ignore;
       var_map
   | StatementItem (ExpressionStatement None) -> var_map
   | StatementItem (ConditionalStatement (exp, st1, Some st2)) ->
       let cond_label = get_unique_label "_cond" in
       let cond_end_label = get_unique_label "_condend" in
-      generate_expression ctx var_map exp;
+      generate_expression ctx var_map exp |> ignore;
       output ("cmpl    $0, %eax\nje    " ^ cond_label ^ "\n");
       let var_map = generate_block_item ctx var_map (StatementItem st1) in
       output ("jmp    " ^ cond_end_label ^ "\n");
@@ -199,7 +256,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       var_map
   | StatementItem (ConditionalStatement (exp, st1, None)) ->
       let cond_end_label = get_unique_label "_condend" in
-      generate_expression ctx var_map exp;
+      generate_expression ctx var_map exp |> ignore;
       output ("cmpl    $0, %eax\nje    " ^ cond_end_label ^ "\n");
       let var_map = generate_block_item ctx var_map (StatementItem st1) in
       output (cond_end_label ^ ":\n");
@@ -212,10 +269,10 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       ( match exp1_opt with
       | None -> ()
       | Some exp ->
-          generate_expression ctx var_map exp;
+          generate_expression ctx var_map exp |> ignore;
           () );
       output (cond_label ^ ":\n");
-      generate_expression ctx var_map exp2;
+      generate_expression ctx var_map exp2 |> ignore;
       output ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
       generate_block_item ctx
         (update_break_continue_label var_map break_label continue_label)
@@ -226,7 +283,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       ( match exp3_opt with
       | None -> ()
       | Some exp ->
-          generate_expression ctx var_map exp;
+          generate_expression ctx var_map exp |> ignore;
           () );
       output ("jmp    " ^ cond_label ^ "\n");
       output (end_label ^ ":\n");
@@ -248,7 +305,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
           (DeclareItem declare)
       in
       output (cond_label ^ ":\n");
-      generate_expression ctx condition_var_map exp2;
+      generate_expression ctx condition_var_map exp2 |> ignore;
       output ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
       generate_block_item ctx
         (update_break_continue_label condition_var_map break_label
@@ -259,7 +316,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       generate_update_esp ctx condition_var_map;
       ( match exp3_opt with
       | None -> ()
-      | Some exp -> generate_expression ctx condition_var_map exp );
+      | Some exp -> generate_expression ctx condition_var_map exp |> ignore );
       output ("jmp    " ^ cond_label ^ "\n");
       output (end_label ^ ":\n");
       generate_update_esp ctx condition_var_map;
@@ -287,7 +344,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       let continue_label = cond_label in
       output (cond_label ^ ":\n");
       generate_update_esp ctx var_map;
-      generate_expression ctx var_map exp;
+      generate_expression ctx var_map exp |> ignore;
       output ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
       generate_block_item ctx
         (update_break_continue_label var_map break_label continue_label)
@@ -309,7 +366,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       |> ignore;
       output (continue_label ^ ":\n");
       generate_update_esp ctx var_map;
-      generate_expression ctx var_map exp;
+      generate_expression ctx var_map exp |> ignore;
       output ("cmpl    $0, %eax\njne    " ^ begin_label ^ "\n");
       output (end_label ^ ":\n");
       generate_update_esp ctx var_map;
@@ -325,30 +382,26 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       output
         ( "addl $"
         ^ string_of_int (4 * VarMap.cardinal inner_var_map.cur_scope_vars)
-        ^ ", %esp\n" );
+        ^ ", %esp # Dealloc the function stack.\n" );
       var_map
   | DeclareItem (DeclareStatement (data_type, a, exp_opt)) -> (
-      let rec get_data_size (t : data_type_t) : int =
-        match t with
-        | IntType -> 4
-        | ArrayType (t2, sizes) ->
-            List.fold_left (fun acc a -> acc * a) 1 sizes * get_data_size t2
-        | _ -> raise (CodeGenError "Unsupported data type.")
-      in
       ( match exp_opt with
       | None -> output "movl    $0, %eax\n"
-      | Some exp -> generate_expression ctx var_map exp );
-      output "push    %eax\n";
+      | Some exp -> generate_expression ctx var_map exp |> ignore );
+      output "push    %eax # alloc begin \n";
+      (* allocate the data block on stack. We already saved one variable so -4.*)
+      output ("subl   $" ^ (string_of_int ((get_data_size data_type) - 4)) ^", %esp\n");
       match VarMap.find_opt a var_map.cur_scope_vars with
-      | Some x ->
+      | Some (_, _) ->
           raise
             (CodeGenError ("Var " ^ a ^ " is already defined in current scope!"))
       | None ->
           {
             var_map with
-            vars = VarMap.add a var_map.index var_map.vars;
-            cur_scope_vars = VarMap.add a var_map.index var_map.cur_scope_vars;
-            index = var_map.index - get_data_size data_type;
+            vars = VarMap.add a (var_map.index, data_type) var_map.vars;
+            cur_scope_vars =
+              VarMap.add a (var_map.index, data_type) var_map.cur_scope_vars;
+            index = var_map.index - (get_data_size data_type);
           } )
 
 (* Generates the assembly code for a list of block items. *)
@@ -369,7 +422,8 @@ let generate_function (ctx : context_t) (f : function_t) : var_map_t =
     | a :: r ->
         generate_f_var_map
           {
-            vars = VarMap.add a index var_map.vars;
+            (* TODO We assumed args are always int. *)
+            vars = VarMap.add a (index, IntType) var_map.vars;
             cur_scope_vars = var_map.cur_scope_vars;
             index = var_map.index;
             break_label = "";

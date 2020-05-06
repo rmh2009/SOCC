@@ -18,18 +18,22 @@ Implemented features:
  - Break/Continue statement.
  - Block statements.
  - Function declaration and call.
+ - Support for array type. (see notes)
+ - A simple type checking system. (see notes)
 
 Limitations:
  - Only has int data type.
  - For now it only compiles to 32 bit x86 assembly code.
 
 Features missing:
- - Support for array type.
  - Support for pointers.
  - Support for struct.
  - Data types other than int, such as double/char etc.
 
-So far I've been mostly following this article here: https://norasandler.com/2017/11/29/Write-a-Compiler.html.
+So far I've been mostly following this article here: https://norasandler.com/2017/11/29/Write-a-Compiler.html. This article stopped at implementing function calls (As of May 2020). After this I implemented a simple type checking system, support for arrays etc. on my own. I plan to keep adding more features gradually and will summarize my solution below.
+
+# Note 1 : The support for array data type.
+TODO
 
 # Compiling the assembly
 

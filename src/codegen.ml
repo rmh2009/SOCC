@@ -83,18 +83,21 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
        * the type of exp1, so we need to evaluate exp1 first.*)
       let t = generate_expression ctx var_map exp1 in
       let (ArrayType (data_type, sizes)) = t in
+      let child_type = match sizes with
+      | hd :: tl -> ArrayType (data_type, tl)
+      | [ hd ] -> data_type
+      | [] -> CodeGenError "ArrayType can not have empty dimension!" |> raise 
+      in
       output "pushl    %eax # index array addr\n";
       let t2 = generate_expression ctx var_map exp2 in
-      output ("imul    $" ^ (string_of_int (get_data_size data_type)) ^ ", %eax # nidex array index\n");
+      output ("imul    $" ^ (string_of_int (get_data_size child_type)) ^ ", %eax # nidex array index\n");
       output "popl    %ecx\n";
       output "subl    %eax, %ecx\n";
       output "movl    %ecx, %eax\n";
       if List.length sizes = 1 then output "movl    (%eax), %eax# index array end (value)\n"
       else output " # index array end (addr, already in eax)\n";
-      match sizes with
-      | hd :: tl -> ArrayType (data_type, tl)
-      | [ hd ] -> data_type
-      | [] -> CodeGenError "ArrayType can not have empty dimension!" |> raise )
+      child_type
+      )
   | ConstantIntExp n ->
       output ("movl    $" ^ string_of_int n ^ ", %eax\n");
       IntType

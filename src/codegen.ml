@@ -88,9 +88,11 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
        * during code generation, the evaluation result and step size also depends on
        * the type of exp1, so we need to evaluate exp1 first.*)
       let t = generate_expression ctx var_map exp1 in
-      let (ArrayType (child_type, size)) = t in
+      (match t with 
+      | (ArrayType (child_type, size)) -> 
       output "pushl    %eax # index array addr\n";
       let t2 = generate_expression ctx var_map exp2 in
+      ignore t2;
       output
         ( "imul    $"
         ^ string_of_int (get_data_size child_type)
@@ -102,13 +104,17 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
         output "movl    (%eax), %eax# index array end (value)\n"
       else output " # index array end (addr, already in eax)\n";
       child_type
+      | _ -> raise (CodeGenError("Target is not array type: " ^ (print_expression 0 exp1) ^ ", actual type: " ^ print_data_type t))
+      )
   | DereferenceExp exp ->
       let t = generate_expression ctx var_map exp in
       if not (is_type_pointer t) then
         raise (CodeGenError "Only pointer type can be dereferenced.")
       else output "movl    (%eax), %eax\n";
-      let (PointerType inner) = t in
-      inner
+      (match t with 
+      | (PointerType inner) -> inner
+      | _ -> raise (CodeGenError("Expecting a pointer type in DereferenceExp."))
+      )
   | AddressOfExp (VarExp a) -> (
       match VarMap.find_opt a var_map.vars with
       | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
@@ -122,9 +128,11 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
   | AddressOfExp (ArrayIndexExp(exp1, exp2)) ->
       (* TODO remove this duplicate code with the ArrayIndexExp code above. *)
       let t = generate_expression ctx var_map exp1 in
-      let (ArrayType (child_type, size)) = t in
+      (match t with
+      | (ArrayType (child_type, size)) ->
       output "pushl    %eax # index array addr\n";
       let t2 = generate_expression ctx var_map exp2 in
+      ignore t2;
       output
         ( "imul    $"
         ^ string_of_int (get_data_size child_type)
@@ -133,6 +141,8 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
       output "subl    %eax, %ecx\n";
       output "movl    %ecx, %eax\n";
       PointerType(child_type)
+      | _ -> raise (CodeGenError("Expecting an array type in ArrayIndexExp."))
+      )
   | AddressOfExp (_) -> raise (CodeGenError("Can only take address of array element or varaible."))
   | ConstantIntExp n ->
       output ("movl    $" ^ string_of_int n ^ ", %eax\n");
@@ -247,7 +257,7 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
       | ArrayType (element_type, size) ->
           if is_type_array element_type then
             raise (CodeGenError "Only 1-D array is assignable.")
-          else generate_expression ctx var_map exp2;
+          else generate_expression ctx var_map exp2 |> ignore;
           (* TODO change this to calculate step size. *)
           output "imul    $4, %eax  # array assign index\n";
           output "popl    %ecx\n";

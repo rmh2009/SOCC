@@ -113,6 +113,9 @@ let print_token (token : token_t) : string =
   | ContinueKeyword -> "Continue"
   | Comma -> "Comma"
   | Address -> "Address"
+  | CharKeyword -> "Char"
+  | FloatKeyword -> "Float"
+  | DoubleKeyword -> "Double"
 
 exception LexerError of string
 

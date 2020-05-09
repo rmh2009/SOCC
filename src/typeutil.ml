@@ -47,6 +47,8 @@ let parse_data_type (tokens : token_t list) :
     | FloatKeyword :: r -> helper None FloatType r
     | x :: r ->
         TokenError ("Illegal token in parse type: " ^ print_token x) |> raise
+    | [] -> 
+        TokenError ("Empty tokens in parse_data_type.") |> raise
   in
   match name_opt with
   | None -> TokenError "Failed to get declared name in parse_type." |> raise

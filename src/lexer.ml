@@ -23,7 +23,7 @@ type token_t =
   | LogicalNegation (* this is the ! sign *)
   | BitComplement
   | Addition
-  | Multiplication
+  | Multiplication (* Also pointer declaration and dereference *)
   | Division
   | EndOfFile
   | And
@@ -45,6 +45,7 @@ type token_t =
   | BreakKeyword
   | ContinueKeyword
   | Comma
+  | Address
 
 let is_type_keyword token : bool =
   if token = IntKeyword then true
@@ -69,9 +70,9 @@ let print_token (token : token_t) : string =
   let print_literal l =
     match l with
     | StringLiteral s -> "String Literal: " ^ s
-    | IntLiteral i -> "Int Literal: " ^ (string_of_int i)
-    | CharLiteral c -> "Char Literal: " ^ (String.make 1 c)
-    | FloatLiteral f -> "Float Literal: " ^ (string_of_float f)
+    | IntLiteral i -> "Int Literal: " ^ string_of_int i
+    | CharLiteral c -> "Char Literal: " ^ String.make 1 c
+    | FloatLiteral f -> "Float Literal: " ^ string_of_float f
   in
   match token with
   | IntKeyword -> "IntKeyword"
@@ -83,7 +84,7 @@ let print_token (token : token_t) : string =
   | RightBracket -> "RightBracket"
   | ReturnKeyword -> "ReturnKeyword"
   | Identifier a -> "Identifier: " ^ a
-  | Literal l -> print_literal l 
+  | Literal l -> print_literal l
   | Semicolon -> "Semicolon"
   | Negation -> "Negation -"
   | LogicalNegation -> "LogicalNegation !"
@@ -111,6 +112,7 @@ let print_token (token : token_t) : string =
   | BreakKeyword -> "Break"
   | ContinueKeyword -> "Continue"
   | Comma -> "Comma"
+  | Address -> "Address"
 
 exception LexerError of string
 
@@ -147,19 +149,19 @@ let parse_tokens (content : string) : token_t list =
     else if word = "break" then (BreakKeyword, loc)
     else if word = "continue" then (ContinueKeyword, loc)
     else if is_alpha word.[0] then (Identifier word, loc)
-    else Literal(IntLiteral (int_of_string word)), loc
+    else (Literal (IntLiteral (int_of_string word)), loc)
   in
   let parse_char content i =
     let c = content.[i] in
-    if content.[i+1] = '\'' then Literal(CharLiteral(c)), i+2
+    if content.[i + 1] = '\'' then (Literal (CharLiteral c), i + 2)
     else raise (LexerError "Expecting Right Single Quote in parse_char.")
   in
   (* Parses a string literal. *)
   let rec parse_string_literal acc content i =
-    if i >= String.length content then LexerError("Unexpected end of file in parse_string_literal.") |> raise
-    else
-      if content.[i] = '"' then Literal(StringLiteral(acc)), i+1
-      else parse_string_literal (acc ^ (String.make 1 content.[i])) content (i+1)
+    if i >= String.length content then
+      LexerError "Unexpected end of file in parse_string_literal." |> raise
+    else if content.[i] = '"' then (Literal (StringLiteral acc), i + 1)
+    else parse_string_literal (acc ^ String.make 1 content.[i]) content (i + 1)
   in
 
   let rec parse_one_token content i =
@@ -185,8 +187,7 @@ let parse_tokens (content : string) : token_t list =
       | ':' -> (Colon, i + 1)
       | '?' -> (QuestionMark, i + 1)
       | '&' ->
-          if content.[i + 1] = '&' then (And, i + 2)
-          else raise (LexerError "Expeting another & sign.")
+          if content.[i + 1] = '&' then (And, i + 2) else (Address, i + 1)
       | '|' ->
           if content.[i + 1] = '|' then (Or, i + 2)
           else raise (LexerError "Expeting another | sign.")
@@ -212,5 +213,3 @@ let parse_tokens (content : string) : token_t list =
     else tokens
   in
   List.rev (parse_tokens_acc [] content 0)
-
-

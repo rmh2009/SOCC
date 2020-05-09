@@ -34,6 +34,7 @@ Features missing:
 So far I've been mostly following this article here: https://norasandler.com/2017/11/29/Write-a-Compiler.html. This article stopped at implementing function calls (As of May 2020). After this I implemented a simple type checking system, support for arrays etc. on my own. I plan to keep adding more features gradually and will summarize my solution below.
 
 # Note 1 : The support for array data type.
+[May 8 2020]
 
 At this point the basic structure of expression evaluations and flow control has been established, but the type system is still very primitive, i.e. we only have int type. Next I've decided to implement support for array type on my own. For starting point, we should support following operations: array declaration, array reference, and assignment:
 
@@ -137,6 +138,11 @@ function evaluate(expression):
     ... # move the result of exp3 to the saved address.
 
 ```
+
+# Note 2 : The support for pointer
+[May 9 2020]
+
+TBD
 
 # Compiling the assembly
 

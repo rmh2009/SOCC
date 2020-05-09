@@ -18,7 +18,7 @@ fi
 
 if [ $COMPILE == 1 ]; then
   # Compile the compiler, then use it to compile the test.cc file into assembly.s.
-  ocamlopt -o cc_ocaml lexer.ml parser.ml util.ml codegen.ml main.ml
+  ocamlopt -o cc_ocaml type.ml lexer.ml typeutil.ml  parser.ml util.ml codegen.ml main.ml
   ret=$?
   if [[ $ret -ne 0 ]]; then
     echo "Comiling failed."

@@ -10,7 +10,7 @@ compile_code() {
     echo "Failed to copy file test/$cc_file"
     exit 1
   fi
-  ocamlopt -o cc_ocaml ../src/lexer.ml ../src/parser.ml ../src/util.ml ../src/codegen.ml ../src/main.ml
+  ocamlopt -o cc_ocaml ../src/lexer.ml ../src/type.ml ../src/typeutil.ml ../src/parser.ml ../src/util.ml ../src/codegen.ml ../src/main.ml
   ret=$?
   if [[ $ret -ne 0 ]]; then
     echo "Compiling failed."
@@ -89,6 +89,8 @@ run_test "print_hello_world.cc" 0 "Hello, World!"
 run_test "array_test1_expect_4.cc" 4
 run_test "array_2d_test_expect_4.cc" 4
 run_test "array_2d_test_expect2_18.cc" 18
+
+run_test "pointer_test1_expect_3.cc" 3
 }
 
 echo "Running all unit tests."

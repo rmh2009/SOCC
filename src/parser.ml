@@ -1,93 +1,11 @@
 open Lexer
-
-type data_type_t =
-  | IntType
-  | FloatType
-  | DoubleType
-  | CharType
-  | ArrayType of data_type_t * int list
-  | PointerType of data_type_t
-  | UnknownType
-
-let rec print_data_type (t : data_type_t) : string =
-  match t with
-  | IntType -> "IntType"
-  | FloatType -> "FloatType"
-  | DoubleType -> "DoubleType"
-  | CharType -> "CharType"
-  | ArrayType (t, sizes) ->
-      print_data_type t ^ " sizes: "
-      ^ List.fold_left (fun acc a -> acc ^ string_of_int a ^ ",") "" sizes
-  | PointerType t -> "pointer of " ^ print_data_type t
-  | UnknownType -> "UnknownType"
-
-(* Expression is further decomposed into factors and terms. Factor is the smallest group
- * consisting of constants, unary operator or grouped expressions.
- * Term is defined as multiple factors connected by / or *. 
- * Expression is multiple terms connected by + or - signs. *)
-type expression_t =
-  | ConstantIntExp of int
-  | ConstantCharExp of char
-  | ConstantStringExp of string
-  | ConstantFloatExp of float
-  | VarExp of string
-  | ArrayIndexExp of expression_t * expression_t (* first expression_t must be of type array, second is index *)
-  | GroupedExpression of expression_t
-  | NegateOp of expression_t
-  | LogicalNegateOp of expression_t
-  | ComplementOp of expression_t
-  | MultiExp of expression_t * expression_t
-  | DivideExp of expression_t * expression_t
-  | AdditionExp of expression_t * expression_t
-  | MinusExp of expression_t * expression_t
-  | LessExp of expression_t * expression_t
-  | LessOrEqualExp of expression_t * expression_t
-  | GreaterExp of expression_t * expression_t
-  | GreaterOrEqualExp of expression_t * expression_t
-  | EqualExp of expression_t * expression_t
-  | NotEqualExp of expression_t * expression_t
-  | OrExp of expression_t * expression_t
-  | AndExp of expression_t * expression_t
-  | AssignExp of expression_t * expression_t (* The first expression_t must be assignable. *)
-  | ConditionExp of expression_t * expression_t * expression_t
-  | FunctionCallExp of string * expression_t list
-
-type statement_t =
-  | ReturnStatement of expression_t
-  | ExpressionStatement of expression_t option
-  | ConditionalStatement of expression_t * statement_t * statement_t option
-  | CompoundStatement of block_item_t list
-  | ForStatement of
-      expression_t option * expression_t * expression_t option * statement_t
-  | ForDeclStatement of
-      declare_t * expression_t * expression_t option * statement_t
-  | WhileStatement of expression_t * statement_t
-  | DoStatement of statement_t * expression_t
-  | BreakStatement
-  | ContinueStatement
-
-and declare_t = DeclareStatement of data_type_t * string * expression_t option
-
-and block_item_t = StatementItem of statement_t | DeclareItem of declare_t
-
-type function_t =
-  | IntFunction of string * string list * block_item_t list option
-
-type program_t = Program of function_t list
-
-exception TokenError of string
+open Type
+open Typeutil
 
 let is_assignable (exp : expression_t) : bool =
   match exp with VarExp _ -> true | ArrayIndexExp (_, _) -> true | _ -> false
 
 let fail message = raise (TokenError message)
-
-let rec get_data_size (t : data_type_t) : int =
-  match t with
-  | IntType -> 4
-  | ArrayType (t2, sizes) ->
-      List.fold_left (fun acc a -> acc * a) 1 sizes * get_data_size t2
-  | _ -> fail "Unsupported data type."
 
 let peek (tokens : token_t list) : token_t =
   match tokens with [] -> fail "No tokens left in peek tokens." | a :: _ -> a
@@ -117,6 +35,8 @@ let rec print_expression spaces exp =
       String.make spaces ' ' ^ "ArrayIndex:\n"
       ^ print_expression (spaces + 1) arr
       ^ print_expression (spaces + 1) index
+  | DereferenceExp (exp) -> String.make spaces ' ' ^ "PointerDereference:\n" ^ print_expression (spaces + 1) exp
+  | AddressOfExp (exp) -> String.make spaces ' ' ^ "AddressOf:\n" ^ print_expression (spaces + 1) exp
   | ConstantIntExp n ->
       String.make spaces ' ' ^ "IntegerExpression: " ^ string_of_int n ^ "\n"
   | ConstantCharExp n ->
@@ -222,9 +142,9 @@ and print_ast (ast : program_t) : string =
     match st with
     | DeclareStatement (t, a, None) ->
         String.make spaces ' ' ^ "Declare Statement of " ^ a ^ " type: "
-        ^ print_data_type t ^ "\n"
+        ^ (print_data_type t) ^ "\n"
     | DeclareStatement (t, a, Some exp) ->
-        String.make spaces ' ' ^ "Declare and Init Statement of " ^ a ^ ":\n"
+        String.make spaces ' ' ^ "Declare and Init Statement of " ^ a ^ " type: " ^ (print_data_type t)  ^ "\n"
         ^ print_expression (spaces + 1) exp
   and print_block_item spaces item =
     match item with
@@ -301,6 +221,12 @@ let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
           (FunctionCallExp (a, params), r3)
       | LeftBracket :: r2 -> parse_array_index_exp (VarExp a) r2
       | r2 -> (VarExp a, r2) )
+  | Multiplication :: r ->
+      let factor, r = parse_factor r in
+      DereferenceExp(factor), r
+  | Address :: r ->
+      let factor, r = parse_factor r in
+      AddressOfExp(factor), r
   | Negation :: r ->
       let exp, left = parse_factor r in
       (NegateOp exp, left)
@@ -522,30 +448,7 @@ let rec parse_statement (tokens : token_t list) : statement_t * token_t list =
 (* Parses a delcare statement. Does not consume the trailing Semicolon. *)
 and parse_declare (tokens : token_t list) : declare_t * token_t list =
   (* Parses '[1][2]' into an int list *)
-  let rec parse_array_sizes acc tokens =
-    match tokens with
-    | LeftBracket :: Literal (IntLiteral a) :: RightBracket :: r ->
-        parse_array_sizes (acc @ [ a ]) r
-    | _ -> (acc, tokens)
-  in
-  let (type_token :: r) = tokens in
-  let data_type_raw =
-    match type_token with
-    | IntKeyword -> IntType
-    | FloatKeyword -> FloatType
-    | DoubleKeyword -> DoubleType
-    | CharKeyword -> CharType
-    | a -> fail ("Expecting data type keyword, but got token: " ^ print_token a)
-  in
-  let identifier, data_type, r =
-    match r with
-    | Identifier a :: r ->
-        if peek r = LeftBracket then
-          let array_sizes, r2 = parse_array_sizes [] r in
-          (a, ArrayType (data_type_raw, array_sizes), r2)
-        else (a, data_type_raw, r)
-    | _ -> fail "Expecting an identifier in parse_declare."
-  in
+  let identifier, data_type, r = parse_data_type tokens in
   match r with
   | Assignment :: r ->
       let exp, left = parse_expression r in

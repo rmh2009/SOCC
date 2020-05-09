@@ -1,6 +1,8 @@
 open Lexer
 open Parser
 open Util
+open Type
+open Typeutil
 module VarMap = Map.Make (String)
 
 exception CodeGenError of string
@@ -74,30 +76,49 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
               output ("movl  " ^ string_of_int offset ^ "(%ebp),  %eax\n")
           | ArrayType (_, _) ->
               output "movl    %ebp, %eax\n";
-              output ("addl  $" ^ (string_of_int offset) ^ ", %eax\n");
-          | x -> CodeGenError ("Unsupported type in VarExp." ^ (print_data_type x)) |> raise );
+              output ("addl  $" ^ string_of_int offset ^ ", %eax\n")
+          | PointerType _ ->
+              output ("movl  " ^ string_of_int offset ^ "(%ebp),  %eax\n")
+          | x ->
+              CodeGenError ("Unsupported type in VarExp." ^ print_data_type x)
+              |> raise );
           t )
-  | ArrayIndexExp (exp1, exp2) -> (
+  | ArrayIndexExp (exp1, exp2) ->
       (* exp1 must be of type Array, in the current implementation types are evaluated
        * during code generation, the evaluation result and step size also depends on
        * the type of exp1, so we need to evaluate exp1 first.*)
       let t = generate_expression ctx var_map exp1 in
-      let (ArrayType (data_type, sizes)) = t in
-      let child_type = match sizes with
-      | hd :: tl -> ArrayType (data_type, tl)
-      | [ hd ] -> data_type
-      | [] -> CodeGenError "ArrayType can not have empty dimension!" |> raise 
-      in
+      let (ArrayType (child_type, size)) = t in
       output "pushl    %eax # index array addr\n";
       let t2 = generate_expression ctx var_map exp2 in
-      output ("imul    $" ^ (string_of_int (get_data_size child_type)) ^ ", %eax # nidex array index\n");
+      output
+        ( "imul    $"
+        ^ string_of_int (get_data_size child_type)
+        ^ ", %eax # nidex array index\n" );
       output "popl    %ecx\n";
       output "subl    %eax, %ecx\n";
       output "movl    %ecx, %eax\n";
-      if List.length sizes = 1 then output "movl    (%eax), %eax# index array end (value)\n"
+      if not (is_type_array child_type) then
+        output "movl    (%eax), %eax# index array end (value)\n"
       else output " # index array end (addr, already in eax)\n";
       child_type
-      )
+  | DereferenceExp exp ->
+      let t = generate_expression ctx var_map exp in
+      if not (is_type_pointer t) then
+        raise (CodeGenError "Only pointer type can be dereferenced.")
+      else output "movl    (%eax), %eax\n";
+      let (PointerType inner) = t in
+      inner
+  | AddressOfExp (VarExp a) -> (
+      match VarMap.find_opt a var_map.vars with
+      | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+      | Some (offset, t) -> (
+          match t with
+          | IntType | ArrayType (_, _) | PointerType _ ->
+              output
+                ("movl  %ebp, %eax\naddl $" ^ string_of_int offset ^ ",  %eax\n");
+              PointerType t
+          | _ -> raise (CodeGenError "Illegal type in AddressOfExp.") ) )
   | ConstantIntExp n ->
       output ("movl    $" ^ string_of_int n ^ ", %eax\n");
       IntType
@@ -204,25 +225,26 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
           let t = generate_expression ctx var_map exp in
           output ("movl  %eax, " ^ string_of_int offset ^ "(%ebp)\n");
           t )
-  | AssignExp (ArrayIndexExp (exp1, exp2), exp_r) ->
+  | AssignExp (ArrayIndexExp (exp1, exp2), exp_r) -> (
       let t = generate_expression ctx var_map exp1 in
       output "pushl    %eax # array assign addr\n";
-      (match t with
-      | ArrayType (element_type, sizes) ->
-          if List.length sizes <> 1 then raise (CodeGenError("Only 1-D array is assignable."))
-          else 
-            generate_expression ctx var_map exp2;
-            (* TODO change this to calculate step size. *)
-            output "imul    $4, %eax  # array assign index\n";
-            output "popl    %ecx\n";
-            output "subl    %eax, %ecx\n";
-            output "pushl    %ecx\n";
-            generate_expression ctx var_map exp_r |> ignore;
-            output "popl    %ecx\n";
-            output "movl    %eax, (%ecx) # array assign end\n";
-            element_type
-      | a -> CodeGenError("Type is not assignable: " ^ print_data_type (a)) |> raise )
-
+      match t with
+      | ArrayType (element_type, size) ->
+          if is_type_array element_type then
+            raise (CodeGenError "Only 1-D array is assignable.")
+          else generate_expression ctx var_map exp2;
+          (* TODO change this to calculate step size. *)
+          output "imul    $4, %eax  # array assign index\n";
+          output "popl    %ecx\n";
+          output "subl    %eax, %ecx\n";
+          output "pushl    %ecx\n";
+          generate_expression ctx var_map exp_r |> ignore;
+          output "popl    %ecx\n";
+          output "movl    %eax, (%ecx) # array assign end\n";
+          element_type
+      | a ->
+          CodeGenError ("Type is not assignable: " ^ print_data_type a) |> raise
+      )
   | AssignExp (_, _) ->
       CodeGenError "Left hand side is not assignable!" |> raise
 
@@ -393,7 +415,8 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       | Some exp -> generate_expression ctx var_map exp |> ignore );
       output "push    %eax # alloc begin \n";
       (* allocate the data block on stack. We already saved one variable so -4.*)
-      output ("subl   $" ^ (string_of_int ((get_data_size data_type) - 4)) ^", %esp\n");
+      output
+        ("subl   $" ^ string_of_int (get_data_size data_type - 4) ^ ", %esp\n");
       match VarMap.find_opt a var_map.cur_scope_vars with
       | Some (_, _) ->
           raise
@@ -404,7 +427,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
             vars = VarMap.add a (var_map.index, data_type) var_map.vars;
             cur_scope_vars =
               VarMap.add a (var_map.index, data_type) var_map.cur_scope_vars;
-            index = var_map.index - (get_data_size data_type);
+            index = var_map.index - get_data_size data_type;
           } )
 
 (* Generates the assembly code for a list of block items. *)

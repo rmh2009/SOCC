@@ -20,14 +20,12 @@ Implemented features:
  - Function declaration and call.
  - Support for array type. (see notes)
  - A simple type checking system. (see notes)
+ - Support for pointer.
 
 Limitations:
- - Only has int data type.
  - For now it only compiles to 32 bit x86 assembly code.
 
 Features missing:
- - Support for pointer.
- - Heap allocation (malloc/free).
  - Support for struct.
  - Data types other than int, such as double/char etc.
 
@@ -75,11 +73,11 @@ IndexOperation(IndexOperation(Var(d2), Var(i)), Var(j))
 ```
 
 All seem good and simple, except it didn't really work.. If we try to implement this, then we see that index operation depends on the step size, which depends on the size of the child element. But int our AST above we don't know the index size since expression1 could be anything. Also the evaluation depends on the element type, we want 'd2' to evaluate to the address, 'd2[i]' also evaluate to the address, and only 'd2[i][j]' evaluates to the value (since the type is no longer an array).
-We can only do this if we know the type of expression1. So we need to define a data_type type first: 
+We can only do this if we know the type of expression1. So we need to define a data_type type first (in OCaml syntax): 
 ```
 type data_type_t =
 | Int
-| Array of data_type_t * int list
+| Array of data_type_t * int
 ```
 
 Next I decided to modify the expression evaluation function during code generation phase to always return a data_type of the evaluated expression. This is simpler than the alternative of annotating the AST with type information in every expression node (which would require a second pass of the parser phase). This also allows us to do some type checking, such as 'Expecting an array, but got an int', or 'Can not compare array and int etc."
@@ -90,27 +88,18 @@ function evalute(expression):
 
   ... # Processing other expressions.
   if expression is IndexOperation(exp1, exp2):
-    Array(element_type, size_list) = evaluate(exp1)  // we got type of exp1.
+    Array(child_type, size) = evaluate(exp1)  // we got type of exp1.
     ... # push exp1 to stack
     evaluate(exp2) // exp2 is now in register.
-    ... # pop exp1 from stack.
-    step_size = get_data_type_size(element_type)
-
-    if length of size_list is 1:
-      child_type = element_type
-    else if size of size_list > 1:
-      child_type = Array(element_type, remove_first_element(size_list))
-    else:
-      fail "should not happen."
+    ... # push exp2 to stack.
+    step_size = get_data_type_size(child_type)
     ... # Calculate the address of the element using step_size, exp1 and exp2 and push to stack.
 
     if child_type is Array:
-      ... # Return value of address
+      ... # Return address directly.
     else:
-      ... # Return address directly
-
+      ... # Return value at the address.
     return child_type
-
 ```
 
 For assignment operation a[i][j] = 5, this is parsed as
@@ -124,25 +113,74 @@ This is the pseudo code for the code generation for assignment expression to an 
 function evaluate(expression):
   ... # Processing other expressions.
   if expression is AssignOperation(ArrayOperation(exp1, exp2), exp3):
-    Array(element_type, size_list) = evaluate(exp1)  // we got type of exp1.
+    Array(child_type, size) = evaluate(exp1)  // we got type of exp1.
     ... # push exp1 to stack
     evaluate(exp2) // exp2 is now in register.
-    ... # pop exp1 from stack.
-    step_size = get_data_type_size(element_type)
-    ... # calculate address of the target element and push to stack.
+    ... # push exp2 to stack.
+    step_size = get_data_type_size(echild_type
+    ... # Calculate the address of the element using step_size, exp1 and exp2 and push to stack.
     
     t3 = evaluate(exp3)
 
-    check(t3 = element_type) # check we are assigning to the same type.
-    check(len(size_list is 1) # exp1 must be an 1-d array.
+    check(t3 = child_type) # check we are assigning to the same type.
+    check(child_type != ArrayType) # exp1 must be an 1-d array.
     ... # move the result of exp3 to the saved address.
-
 ```
 
 # Note 2 : The support for pointer
 [May 9 2020]
 
-TBD
+Pointer is one of the most interesting features in C. Now let's see how it can be implemented.
+
+For type declarations, I'm not an expert in C, but complex pointer type definitions can be notoriously difficult to parse. Consider this type:
+
+```
+int* (*p)[10];
+int* *p2[10];
+```
+
+The first statement defines a pointer to an array of size 10, containing pointers to int. The second statement defines an array of pointer to pointer to ints... If you find it confusing, the simple rule is to start from the inner most pointer/identifier and try to go right first, until you hit a parentheses, then go left. To make things easier, also since they are rarely used in practical coding, I'll have this limit imposed:
+
+ * We don't support parentheses in type declarations for now.
+
+These are examples of the pointer related declarations we plan to support:
+```
+// Declaration
+int* p;
+int* pm[10];
+int** pp;
+```
+
+The grammar can be expressed as below, where {} means zero or more occurencess, () is for grouping, not the actual parentheses '\('.
+```
+type_expression = 
+(int|char|double|float)(type_expression) {*} (identifier) { '[' number ']' }
+```
+
+* A type declaration must have one and only one identifier.
+* One and only one of the fundamental types can exist (int, char, float, double), and they must appear on the left most side.
+
+With the above limit/simplification we can write a left-to-right, one pass parser for the type declaration.
+
+Pointer dereference operation is also trivial, for example, '*p' is parsed as DereferenceOp(Var(p)), we just need to check that Var(p) or whatever inner expression returns a pointer type, then we dereference that address.
+
+```
+// Pointer dereference
+*p = 3;
+int b = *p;
+int c = **pp;
+```
+
+For taking address operation AddressOfOp(exp), we need to check if exp is a declared variable, or an array element, and just return the address there. Taking the address of any other expressions should be illegal (such as address of a temporary expression)
+
+```
+// Taking address.
+int* p = &a;
+int** pp = &p;
+p = &m[0];
+```
+
+Both AddressOfOp and DereferenceOp should be parsed on the highest priority, i.e. on the 'factor' level, same as the logical negation operation. The code for taking the address of an array element is actually the same for the ArrayIndexOperation, except we always return the address directly.
 
 # Compiling the assembly
 

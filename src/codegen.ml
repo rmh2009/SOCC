@@ -119,6 +119,21 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
                 ("movl  %ebp, %eax\naddl $" ^ string_of_int offset ^ ",  %eax\n");
               PointerType t
           | _ -> raise (CodeGenError "Illegal type in AddressOfExp.") ) )
+  | AddressOfExp (ArrayIndexExp(exp1, exp2)) ->
+      (* TODO remove this duplicate code with the ArrayIndexExp code above. *)
+      let t = generate_expression ctx var_map exp1 in
+      let (ArrayType (child_type, size)) = t in
+      output "pushl    %eax # index array addr\n";
+      let t2 = generate_expression ctx var_map exp2 in
+      output
+        ( "imul    $"
+        ^ string_of_int (get_data_size child_type)
+        ^ ", %eax # index array index\n" );
+      output "popl    %ecx\n";
+      output "subl    %eax, %ecx\n";
+      output "movl    %ecx, %eax\n";
+      PointerType(child_type)
+  | AddressOfExp (_) -> raise (CodeGenError("Can only take address of array element or varaible."))
   | ConstantIntExp n ->
       output ("movl    $" ^ string_of_int n ^ ", %eax\n");
       IntType

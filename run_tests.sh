@@ -91,6 +91,8 @@ run_test "array_2d_test_expect_4.cc" 4
 run_test "array_2d_test_expect2_18.cc" 18
 
 run_test "pointer_test1_expect_3.cc" 3
+run_test "pointer_test2_expect_10.cc" 10
+run_test "pointer_test3_address_of_array_element_expect3.cc" 3
 }
 
 echo "Running all unit tests."

@@ -18,44 +18,52 @@ type var_map_t = {
 type context_t = {
   output : string -> unit;
   get_unique_label : string -> string;
+  is_64_bit : bool;
 }
 
 (* Hacky solution per Nora's article to add padding so that function stack is 16
  * byte aligned. This is for MacOs only. *)
-let add_function_call_padding (output : string -> unit) (num_args : int) : unit
+let add_function_call_padding (ctx : context_t) (num_args : int) : unit
     =
-  output "movl    %esp, %eax\n";
-  output ("subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
-  output "xorl %edx, %edx\nmovl $0x20, %ecx\nidivl %ecx\n";
-  output "subl %edx, %esp\npushl %edx\n"
+  ctx.output "movl    %esp, %eax\n";
+  ctx.output ("subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
+  ctx.output "xorl %edx, %edx\nmovl $0x20, %ecx\nidivl %ecx\n";
+  ctx.output "subl %edx, %esp\npushl %edx\n"
 
 let remove_function_call_padding (ctx : context_t) : unit =
   ctx.output "popl %edx\naddl %edx, %esp\n"
 
+(* Injected after certain jump labels to refresh the esp, this is like
+ * deallocating objects allocated in the inner scope(s) *)
 let generate_update_esp (ctx : context_t) (var_map : var_map_t) : unit =
   ctx.output "movl    %ebp, %eax\n";
   ctx.output ("subl    $" ^ string_of_int (-var_map.index - 4) ^ ",  %eax\n");
   ctx.output "movl    %eax, %esp\n"
 
+(* Generate code for calling a function. This includes adding padding for
+ * alignment, pushing parameters, remove padding afterwards, etc.*)
+let rec generate_f_call ctx var_map fname exps =
+  add_function_call_padding ctx (List.length exps);
+  let rec helper var_map fname exps num_args =
+  match exps with
+  | [] ->
+      ctx.output ("call    _" ^ fname ^ "\n");
+      (* Function returned, remove arguments from stack. *)
+      ctx.output ("addl    $" ^ string_of_int (4 * num_args) ^ ", %esp\n");
+      (* Remove the padding *)
+      remove_function_call_padding ctx
+  | a :: r ->
+      generate_expression ctx var_map a |> ignore;
+      ctx.output "push   %eax\n";
+      helper var_map fname r num_args
+  in
+  helper var_map fname exps (List.length exps)
+
 (* Generates the assembly code for a specific expression. *)
-let rec generate_expression (ctx : context_t) (var_map : var_map_t)
+and generate_expression (ctx : context_t) (var_map : var_map_t)
     (exp : expression_t) : data_type_t =
   let output = ctx.output in
   let get_unique_label = ctx.get_unique_label in
-  let rec generate_f_call var_map fname exps num_args =
-    match exps with
-    | [] ->
-        ctx.output ("call    _" ^ fname ^ "\n");
-        (* Function returned, remove arguments from stack. *)
-        ctx.output ("addl    $" ^ string_of_int (4 * num_args) ^ ", %esp\n");
-        (* Remove the padding *)
-        remove_function_call_padding ctx
-    | a :: r ->
-        generate_expression ctx var_map a |> ignore;
-        ctx.output "push   %eax\n";
-        generate_f_call var_map fname r num_args
-  in
-
   let generate_relational_expression output command exp1 exp2 : data_type_t =
     generate_expression ctx var_map exp1 |> ignore;
     output "push    %eax\n";
@@ -83,37 +91,40 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
               CodeGenError ("Unsupported type in VarExp." ^ print_data_type x)
               |> raise );
           t )
-  | ArrayIndexExp (exp1, exp2) ->
+  | ArrayIndexExp (exp1, exp2) -> (
       (* exp1 must be of type Array, in the current implementation types are evaluated
        * during code generation, the evaluation result and step size also depends on
        * the type of exp1, so we need to evaluate exp1 first.*)
       let t = generate_expression ctx var_map exp1 in
-      (match t with 
-      | (ArrayType (child_type, size)) -> 
-      output "pushl    %eax # index array addr\n";
-      let t2 = generate_expression ctx var_map exp2 in
-      ignore t2;
-      output
-        ( "imul    $"
-        ^ string_of_int (get_data_size child_type)
-        ^ ", %eax # nidex array index\n" );
-      output "popl    %ecx\n";
-      output "subl    %eax, %ecx\n";
-      output "movl    %ecx, %eax\n";
-      if not (is_type_array child_type) then
-        output "movl    (%eax), %eax# index array end (value)\n"
-      else output " # index array end (addr, already in eax)\n";
-      child_type
-      | _ -> raise (CodeGenError("Target is not array type: " ^ (print_expression 0 exp1) ^ ", actual type: " ^ print_data_type t))
-      )
-  | DereferenceExp exp ->
+      match t with
+      | ArrayType (child_type, size) ->
+          output "pushl    %eax # index array addr\n";
+          let t2 = generate_expression ctx var_map exp2 in
+          ignore t2;
+          output
+            ( "imul    $"
+            ^ string_of_int (get_data_size child_type)
+            ^ ", %eax # nidex array index\n" );
+          output "popl    %ecx\n";
+          output "addl    %eax, %ecx\n";
+          output "movl    %ecx, %eax\n";
+          if not (is_type_array child_type) then
+            output "movl    (%eax), %eax# index array end (value)\n"
+          else output " # index array end (addr, already in eax)\n";
+          child_type
+      | _ ->
+          raise
+            (CodeGenError
+               ( "Target is not array type: " ^ print_expression 0 exp1
+               ^ ", actual type: " ^ print_data_type t )) )
+  | DereferenceExp exp -> (
       let t = generate_expression ctx var_map exp in
       if not (is_type_pointer t) then
         raise (CodeGenError "Only pointer type can be dereferenced.")
       else output "movl    (%eax), %eax\n";
-      (match t with 
-      | (PointerType inner) -> inner
-      | _ -> raise (CodeGenError("Expecting a pointer type in DereferenceExp."))
+      match t with
+      | PointerType inner -> inner
+      | _ -> raise (CodeGenError "Expecting a pointer type in DereferenceExp.")
       )
   | AddressOfExp (VarExp a) -> (
       match VarMap.find_opt a var_map.vars with
@@ -125,31 +136,30 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
                 ("movl  %ebp, %eax\naddl $" ^ string_of_int offset ^ ",  %eax\n");
               PointerType t
           | _ -> raise (CodeGenError "Illegal type in AddressOfExp.") ) )
-  | AddressOfExp (ArrayIndexExp(exp1, exp2)) ->
+  | AddressOfExp (ArrayIndexExp (exp1, exp2)) -> (
       (* TODO remove this duplicate code with the ArrayIndexExp code above. *)
       let t = generate_expression ctx var_map exp1 in
-      (match t with
-      | (ArrayType (child_type, size)) ->
-      output "pushl    %eax # index array addr\n";
-      let t2 = generate_expression ctx var_map exp2 in
-      ignore t2;
-      output
-        ( "imul    $"
-        ^ string_of_int (get_data_size child_type)
-        ^ ", %eax # index array index\n" );
-      output "popl    %ecx\n";
-      output "subl    %eax, %ecx\n";
-      output "movl    %ecx, %eax\n";
-      PointerType(child_type)
-      | _ -> raise (CodeGenError("Expecting an array type in ArrayIndexExp."))
-      )
-  | AddressOfExp (_) -> raise (CodeGenError("Can only take address of array element or varaible."))
+      match t with
+      | ArrayType (child_type, size) ->
+          output "pushl    %eax # index array addr\n";
+          let t2 = generate_expression ctx var_map exp2 in
+          ignore t2;
+          output
+            ( "imul    $"
+            ^ string_of_int (get_data_size child_type)
+            ^ ", %eax # index array index\n" );
+          output "popl    %ecx\n";
+          output "addl    %eax, %ecx\n";
+          output "movl    %ecx, %eax\n";
+          PointerType child_type
+      | _ -> raise (CodeGenError "Expecting an array type in ArrayIndexExp.") )
+  | AddressOfExp _ ->
+      raise (CodeGenError "Can only take address of array element or varaible.")
   | ConstantIntExp n ->
       output ("movl    $" ^ string_of_int n ^ ", %eax\n");
       IntType
   | FunctionCallExp (fname, exps) ->
-      add_function_call_padding output (List.length exps);
-      generate_f_call var_map fname exps (List.length exps);
+      generate_f_call ctx var_map fname exps;
       (* TODO assume function always return int. *)
       IntType
   | NegateOp exp ->
@@ -251,6 +261,7 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
           output ("movl  %eax, " ^ string_of_int offset ^ "(%ebp)\n");
           t )
   | AssignExp (ArrayIndexExp (exp1, exp2), exp_r) -> (
+      (* TODO Remove ruplicate code with the other ArrayIndexExp code. *)
       let t = generate_expression ctx var_map exp1 in
       output "pushl    %eax # array assign addr\n";
       match t with
@@ -258,10 +269,9 @@ let rec generate_expression (ctx : context_t) (var_map : var_map_t)
           if is_type_array element_type then
             raise (CodeGenError "Only 1-D array is assignable.")
           else generate_expression ctx var_map exp2 |> ignore;
-          (* TODO change this to calculate step size. *)
-          output "imul    $4, %eax  # array assign index\n";
+          output ("imul    $" ^ (string_of_int (get_data_size element_type)) ^ ", %eax  # array assign index\n");
           output "popl    %ecx\n";
-          output "subl    %eax, %ecx\n";
+          output "addl    %eax, %ecx\n";
           output "pushl    %ecx\n";
           generate_expression ctx var_map exp_r |> ignore;
           output "popl    %ecx\n";
@@ -438,10 +448,12 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       ( match exp_opt with
       | None -> output "movl    $0, %eax\n"
       | Some exp -> generate_expression ctx var_map exp |> ignore );
-      output "push    %eax # alloc begin \n";
-      (* allocate the data block on stack. We already saved one variable so -4.*)
+      (* allocate the data block on stack. *)
       output
-        ("subl   $" ^ string_of_int (get_data_size data_type - 4) ^ ", %esp\n");
+        ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
+      (* Start from the lower address. *)
+      let start_offset = var_map.index + 4 - (get_data_size data_type) in
+      output ("movl    %eax, " ^ (string_of_int start_offset) ^ "(%ebp)\n");
       match VarMap.find_opt a var_map.cur_scope_vars with
       | Some (_, _) ->
           raise
@@ -449,9 +461,9 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       | None ->
           {
             var_map with
-            vars = VarMap.add a (var_map.index, data_type) var_map.vars;
+            vars = VarMap.add a (start_offset, data_type) var_map.vars;
             cur_scope_vars =
-              VarMap.add a (var_map.index, data_type) var_map.cur_scope_vars;
+              VarMap.add a (start_offset, data_type) var_map.cur_scope_vars;
             index = var_map.index - get_data_size data_type;
           } )
 
@@ -511,6 +523,7 @@ let generate_assembly (ast : program_t) : string =
     {
       output = Buffer.add_string buf;
       get_unique_label = get_unique_label count;
+      is_64_bit = false;
     }
   in
   ctx.output ".globl _main\n";

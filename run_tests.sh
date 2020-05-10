@@ -37,6 +37,10 @@ run_test()  {
   result=$2
   expected_output=$3
   compile_code $cc_file
+  if [ $? != 0 ]; then
+    echo "Compiling failed!"
+    exit 1
+  fi
   run_code
   actual_result=$?
   std_output=$(cat std_output.txt)
@@ -94,6 +98,7 @@ run_test "array_2d_test_expect2_18.cc" 18
 run_test "pointer_test1_expect_3.cc" 3
 run_test "pointer_test2_expect_10.cc" 10
 run_test "pointer_test3_address_of_array_element_expect3.cc" 3
+run_test "pointer_test_address_of_address_increasing_expect_4.cc" 4
 }
 
 echo "Running all unit tests."

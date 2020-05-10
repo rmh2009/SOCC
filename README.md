@@ -18,9 +18,9 @@ Implemented features:
  - Break/Continue statement.
  - Block statements.
  - Function declaration and call.
- - Support for array type. (see notes)
- - A simple type checking system. (see notes)
- - Support for pointer.
+ - Support for array type. (see note1)
+ - A simple type checking system. (see note1)
+ - Support for pointer. (see note2)
 
 Limitations:
  - For now it only compiles to 32 bit x86 assembly code.
@@ -59,7 +59,7 @@ Some assumptions on the supported operations:
 
 Declaration is straight forward, all sizes must be known at compile time, so we can store a list of sizes along with the type of the array element (always int for now). The memory layout for multidimentional arrays is designed so that it it can be treated as an array of nested arrays. i.e., a two dimensional array d2[10][20] can be treated as an array with 10 elements, where each element is an array of 20 elements. The total memory size of the array can also be easily calculated from the definition.
 
-Array element assignemnt and reference are very similar. For assignment we need to obtain the address of the specific element, while for reference we also need that address, except we will need the value stored in that address. The tricky part is how do we parse a nested array expression, such as d2[0][1]? Also how do we evaluate partial expression such as d2[0] (if a is two dimentional array)?
+Array element assignment and reference are very similar. For assignment we need to obtain the address of the specific element, while for reference we also need that address, except we will need the value stored in that address. The tricky part is how do we parse a nested array expression, such as d2[0][1]? Also how do we evaluate partial expression such as d2[0] (if a is two dimentional array)?
 
 The solution I initially came up with is to always define array as one dimensional in the AST, which could be nested array. So d2[i][j] can be parsed as (d2[i])[j], which can then be further decomposed into ((a)[i])[j]. So that an array index operation (using the [] operator) can be defined as:
 
@@ -151,7 +151,7 @@ int* pm[10];
 int** pp;
 ```
 
-The grammar can be expressed as below, where {} means zero or more occurencess, () is for grouping, not the actual parentheses '\('.
+The grammar can be expressed as below, where {} means zero or more occurrences, () is for grouping, not the actual parentheses '\('.
 ```
 type_expression = 
 (int|char|double|float)(type_expression) {*} (identifier) { '[' number ']' }

@@ -25,9 +25,9 @@ type context_t = {
 
 (* Hacky solution per Nora's article to add padding so that function stack is 16
  * byte aligned. This is for MacOs only. *)
-let add_function_call_padding (ctx : context_t) (num_args : int) : unit
-    =
+let add_function_call_padding (ctx : context_t) (num_args : int) : unit =
   ctx.output "movl    %esp, %eax\n";
+  (* TODO assumed that function param is always int *)
   ctx.output ("subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
   ctx.output "xorl %edx, %edx\nmovl $0x20, %ecx\nidivl %ecx\n";
   ctx.output "subl %edx, %esp\npushl %edx\n"
@@ -39,7 +39,7 @@ let remove_function_call_padding (ctx : context_t) : unit =
  * deallocating objects allocated in the inner scope(s) *)
 let generate_update_esp (ctx : context_t) (var_map : var_map_t) : unit =
   ctx.output "movl    %ebp, %eax\n";
-  ctx.output ("addl    $" ^ string_of_int (var_map.index) ^ ",  %eax\n");
+  ctx.output ("addl    $" ^ string_of_int var_map.index ^ ",  %eax\n");
   ctx.output "movl    %eax, %esp\n"
 
 (* Generate code for calling a function. This includes adding padding for
@@ -47,17 +47,18 @@ let generate_update_esp (ctx : context_t) (var_map : var_map_t) : unit =
 let rec generate_f_call ctx var_map fname exps =
   add_function_call_padding ctx (List.length exps);
   let rec helper var_map fname exps num_args =
-  match exps with
-  | [] ->
-      ctx.output ("call    _" ^ fname ^ "\n");
-      (* Function returned, remove arguments from stack. *)
-      ctx.output ("addl    $" ^ string_of_int (4 * num_args) ^ ", %esp\n");
-      (* Remove the padding *)
-      remove_function_call_padding ctx
-  | a :: r ->
-      generate_expression ctx var_map a |> ignore;
-      ctx.output "push   %eax\n";
-      helper var_map fname r num_args
+    match exps with
+    | [] ->
+        ctx.output ("call    _" ^ fname ^ "\n");
+        (* Function returned, remove arguments from stack. *)
+        (* TODO assumed that function param is always int *)
+        ctx.output ("addl    $" ^ string_of_int (4 * num_args) ^ ", %esp\n");
+        (* Remove the padding *)
+        remove_function_call_padding ctx
+    | a :: r ->
+        generate_expression ctx var_map a |> ignore;
+        ctx.output "push   %eax\n";
+        helper var_map fname r num_args
   in
   helper var_map fname exps (List.length exps)
 
@@ -271,7 +272,10 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
           if is_type_array element_type then
             raise (CodeGenError "Only 1-D array is assignable.")
           else generate_expression ctx var_map exp2 |> ignore;
-          output ("imul    $" ^ (string_of_int (get_data_size element_type)) ^ ", %eax  # array assign index\n");
+          output
+            ( "imul    $"
+            ^ string_of_int (get_data_size element_type)
+            ^ ", %eax  # array assign index\n" );
           output "popl    %ecx\n";
           output "addl    %eax, %ecx\n";
           output "pushl    %ecx\n";
@@ -384,6 +388,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       generate_update_esp ctx condition_var_map;
       (* The variables declared in the block will be deacllocated automatically inside generate_block_item. *)
       (* The condition expressions has its own scope, needs to be deallocated here. *)
+      (* TODO assumed that variable is always int *)
       output
         ( "addl $"
         ^ string_of_int (4 * VarMap.cardinal condition_var_map.cur_scope_vars)
@@ -441,6 +446,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
           items
       in
       (* Move stack pointer %esp back by number of allocations in the inner scope. This is like deallocating inner variables.*)
+      (* TODO assumed that variable is always int *)
       output
         ( "addl $"
         ^ string_of_int (4 * VarMap.cardinal inner_var_map.cur_scope_vars)
@@ -451,11 +457,10 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       | None -> output "movl    $0, %eax\n"
       | Some exp -> generate_expression ctx var_map exp |> ignore );
       (* allocate the data block on stack. *)
-      output
-        ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
+      output ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
       (* Start from the lower address. *)
-      let start_offset = var_map.index - (get_data_size data_type) in
-      output ("movl    %eax, " ^ (string_of_int start_offset) ^ "(%ebp)\n");
+      let start_offset = var_map.index - get_data_size data_type in
+      output ("movl    %eax, " ^ string_of_int start_offset ^ "(%ebp)\n");
       match VarMap.find_opt a var_map.cur_scope_vars with
       | Some (_, _) ->
           raise
@@ -476,9 +481,6 @@ and generate_block_statements (ctx : context_t) (var_map : var_map_t)
 
 let generate_function (ctx : context_t) (f : function_t) : var_map_t =
   let output = ctx.output in
-
-  (* index is the next available offset to esp to save new local variables, at the
-   * beginning of a function, the index is one word (4 bytes) after the esp register. *)
 
   (* Generates the var_map with the references to the function arguments. *)
   let rec generate_f_var_map var_map fname params index =

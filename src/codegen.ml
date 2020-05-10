@@ -10,6 +10,8 @@ exception CodeGenError of string
 type var_map_t = {
   vars : (int * data_type_t) VarMap.t;
   cur_scope_vars : (int * data_type_t) VarMap.t;
+  (* index is the current offset of (%esp - %ebp), this is used to statically associate a new
+   * variable to its address, which is offset to frame base %ebp. *)
   index : int;
   break_label : string;
   continue_label : string;
@@ -37,7 +39,7 @@ let remove_function_call_padding (ctx : context_t) : unit =
  * deallocating objects allocated in the inner scope(s) *)
 let generate_update_esp (ctx : context_t) (var_map : var_map_t) : unit =
   ctx.output "movl    %ebp, %eax\n";
-  ctx.output ("subl    $" ^ string_of_int (-var_map.index - 4) ^ ",  %eax\n");
+  ctx.output ("addl    $" ^ string_of_int (var_map.index) ^ ",  %eax\n");
   ctx.output "movl    %eax, %esp\n"
 
 (* Generate code for calling a function. This includes adding padding for
@@ -452,7 +454,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       output
         ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
       (* Start from the lower address. *)
-      let start_offset = var_map.index + 4 - (get_data_size data_type) in
+      let start_offset = var_map.index - (get_data_size data_type) in
       output ("movl    %eax, " ^ (string_of_int start_offset) ^ "(%ebp)\n");
       match VarMap.find_opt a var_map.cur_scope_vars with
       | Some (_, _) ->
@@ -499,7 +501,8 @@ let generate_function (ctx : context_t) (f : function_t) : var_map_t =
     {
       vars = VarMap.empty;
       cur_scope_vars = VarMap.empty;
-      index = -4;
+      (* Start the offset as 0, since %ebp = %esp. *)
+      index = 0;
       break_label = "";
       continue_label = "";
     }

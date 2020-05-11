@@ -15,13 +15,36 @@ type var_map_t = {
   index : int;
   break_label : string;
   continue_label : string;
+  function_return_label : string;
 }
 
 type context_t = {
   output : string -> unit;
   get_unique_label : string -> string;
   is_64_bit : bool;
+  (* Used to store the maximum (minimum since it's negative) index. We will
+   * use this to allocate stack at once at the beginning of a function.
+   * Temporary variables may also be allocated here so that we don't have to
+   * call push and pop. *)
+  set_min_index : int -> unit;
+  get_min_index : unit -> int;
 }
+
+(*  Helper to 'virtually' allocate a space on stack, this assumes that we are
+ *  substracting number of bytes from %esp/%rsp register, and return the offset
+ *  from %ebp, as well as the string form 'offset(%ebp), and the new var_map.
+ *  This takes care of tracking the maximum stack depth, so that it could be
+ *  allocated at once. It also takes care of alignments.' *)
+let allocate_stack (ctx : context_t) (vars : var_map_t) (bytes : int) :
+    int * string * var_map_t =
+  let r = -vars.index mod bytes in
+  let new_index =
+    if r = 0 then vars.index - bytes else vars.index - (2 * bytes) + r
+  in
+  if ctx.get_min_index () > new_index then ctx.set_min_index new_index else ();
+  ( new_index,
+    string_of_int new_index ^ "(%esp)",
+    { vars with index = new_index } )
 
 (* Hacky solution per Nora's article to add padding so that function stack is 16
  * byte aligned. This is for MacOs only. *)
@@ -38,9 +61,10 @@ let remove_function_call_padding (ctx : context_t) : unit =
 (* Injected after certain jump labels to refresh the esp, this is like
  * deallocating objects allocated in the inner scope(s) *)
 let generate_update_esp (ctx : context_t) (var_map : var_map_t) : unit =
-  ctx.output "movl    %ebp, %eax\n";
+  (* ctx.output "movl    %ebp, %eax\n";
   ctx.output ("addl    $" ^ string_of_int var_map.index ^ ",  %eax\n");
-  ctx.output "movl    %eax, %esp\n"
+  ctx.output "movl    %eax, %esp\n" *)
+  ()
 
 (* Generate code for calling a function. This includes adding padding for
  * alignment, pushing parameters, remove padding afterwards, etc.*)
@@ -69,9 +93,10 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
   let get_unique_label = ctx.get_unique_label in
   let generate_relational_expression output command exp1 exp2 : data_type_t =
     generate_expression ctx var_map exp1 |> ignore;
-    output "push    %eax\n";
+    let _, temp_loc, var_map = allocate_stack ctx var_map 4 in
+    output ("movl    %eax, " ^ temp_loc ^ "\n");
     generate_expression ctx var_map exp2 |> ignore;
-    output "pop    %ecx\n";
+    output ("movl    " ^ temp_loc ^ ", %ecx\n");
     output "cmpl   %eax, %ecx\n";
     output "movl   $0, %eax\n";
     output (command ^ "   %al\n");
@@ -101,16 +126,16 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
       let t = generate_expression ctx var_map exp1 in
       match t with
       | ArrayType (child_type, size) ->
-          output "pushl    %eax # index array addr\n";
+          let _, temp_loc, var_map = allocate_stack ctx var_map 4 in
+          output ("movl    %eax, " ^ temp_loc ^ "\n");
           let t2 = generate_expression ctx var_map exp2 in
           ignore t2;
           output
             ( "imul    $"
             ^ string_of_int (get_data_size child_type)
             ^ ", %eax # nidex array index\n" );
-          output "popl    %ecx\n";
-          output "addl    %eax, %ecx\n";
-          output "movl    %ecx, %eax\n";
+          output ("movl    " ^ temp_loc ^ ", %ecx\n");
+          output "addl    %ecx, %eax\n";
           if not (is_type_array child_type) then
             output "movl    (%eax), %eax# index array end (value)\n"
           else output " # index array end (addr, already in eax)\n";
@@ -302,8 +327,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
   match st with
   | StatementItem (ReturnStatement exp) ->
       generate_expression ctx var_map exp |> ignore;
-      output "movl    %ebp, %esp\npop    %ebp\n";
-      output "ret\n";
+      output ("jmp  " ^ var_map.function_return_label ^ "    # return \n");
       var_map
   | StatementItem (ExpressionStatement (Some exp)) ->
       generate_expression ctx var_map exp |> ignore;
@@ -386,13 +410,6 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       output ("jmp    " ^ cond_label ^ "\n");
       output (end_label ^ ":\n");
       generate_update_esp ctx condition_var_map;
-      (* The variables declared in the block will be deacllocated automatically inside generate_block_item. *)
-      (* The condition expressions has its own scope, needs to be deallocated here. *)
-      (* TODO assumed that variable is always int *)
-      output
-        ( "addl $"
-        ^ string_of_int (4 * VarMap.cardinal condition_var_map.cur_scope_vars)
-        ^ ", %esp\n" );
       var_map
   | StatementItem BreakStatement ->
       if var_map.break_label = "" then
@@ -440,26 +457,19 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       var_map
   | StatementItem (CompoundStatement items) ->
       (* Entering a new scope, so clear the cur_scope_vars, but we ignore the inner var_map returned. *)
-      let inner_var_map =
-        generate_block_statements ctx
+      generate_block_statements ctx
           { var_map with cur_scope_vars = VarMap.empty }
-          items
-      in
-      (* Move stack pointer %esp back by number of allocations in the inner scope. This is like deallocating inner variables.*)
-      (* TODO assumed that variable is always int *)
-      output
-        ( "addl $"
-        ^ string_of_int (4 * VarMap.cardinal inner_var_map.cur_scope_vars)
-        ^ ", %esp # Dealloc the function stack.\n" );
+          items |> ignore;
       var_map
   | DeclareItem (DeclareStatement (data_type, a, exp_opt)) -> (
       ( match exp_opt with
       | None -> output "movl    $0, %eax\n"
       | Some exp -> generate_expression ctx var_map exp |> ignore );
       (* allocate the data block on stack. *)
-      output ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
+      let start_offset, _, var_map = allocate_stack ctx var_map (get_data_size data_type) in
+      (* output ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
       (* Start from the lower address. *)
-      let start_offset = var_map.index - get_data_size data_type in
+      let start_offset = var_map.index - get_data_size data_type in *)
       output ("movl    %eax, " ^ string_of_int start_offset ^ "(%ebp)\n");
       match VarMap.find_opt a var_map.cur_scope_vars with
       | Some (_, _) ->
@@ -471,7 +481,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
             vars = VarMap.add a (start_offset, data_type) var_map.vars;
             cur_scope_vars =
               VarMap.add a (start_offset, data_type) var_map.cur_scope_vars;
-            index = var_map.index - get_data_size data_type;
+            index = start_offset;
           } )
 
 (* Generates the assembly code for a list of block items. *)
@@ -480,19 +490,15 @@ and generate_block_statements (ctx : context_t) (var_map : var_map_t)
   List.fold_left (generate_block_item ctx) var_map sts
 
 let generate_function (ctx : context_t) (f : function_t) : var_map_t =
-  let output = ctx.output in
-
   (* Generates the var_map with the references to the function arguments. *)
   let rec generate_f_var_map var_map fname params index =
     match params with
     | [] -> var_map
     | a :: r ->
         generate_f_var_map
-          {
+          { var_map with
             (* TODO We assumed args are always int. *)
             vars = VarMap.add a (index, IntType) var_map.vars;
-            cur_scope_vars = var_map.cur_scope_vars;
-            index = var_map.index;
             break_label = "";
             continue_label = "";
           }
@@ -507,6 +513,7 @@ let generate_function (ctx : context_t) (f : function_t) : var_map_t =
       index = 0;
       break_label = "";
       continue_label = "";
+      function_return_label = "";
     }
   in
   match f with
@@ -514,21 +521,46 @@ let generate_function (ctx : context_t) (f : function_t) : var_map_t =
       match items_opt with
       | None -> var_map
       | Some items ->
+          let output = ctx.output in
           output ("_" ^ fname ^ ":\n");
           (* Saving the previous stack start point and use esp as the new stack start. *)
           output "push    %ebp\nmovl    %esp, %ebp\n";
+          (* Reset the index at the function beginning. *)
+          ctx.set_min_index 0;
+          (* This is a little hacky, we need to generate the output then get the stack size,
+           * but we need to output stack allocation command first, so we use a temporary buffer
+           * for each function. *)
+          let fun_buf = Buffer.create 32 in
+          let return_label = ctx.get_unique_label "_fun_return" in
+          let ctx =
+            { ctx with output = (fun a -> Buffer.add_string fun_buf a) }
+          in
           let var_map = generate_f_var_map var_map fname params 8 in
-          generate_block_statements ctx var_map items )
+          (* The block statements will be in the temporary buffer fun_buf. *)
+          let var_map = {var_map with function_return_label = return_label } in
+          let res = generate_block_statements ctx var_map items in
+          output ("addl    $" ^ string_of_int (ctx.get_min_index ()) ^ ", %esp\n");
+          output (Buffer.contents fun_buf);
+          (* Return logic *)
+          output (return_label ^ ":\n");
+          output ("addl    $" ^ string_of_int (-(ctx.get_min_index ())) ^ ", %esp\n");
+          output "movl    %ebp, %esp\npop    %ebp\n";
+          output "ret\n";
+          res )
 
 (* Generates the assembly code as a string given the ast in Parser.program_t type. *)
 let generate_assembly (ast : program_t) : string =
   let buf = Buffer.create 32 in
   let count = ref 0 in
+  (* minimum offset of %esp - %ebp *)
+  let min_index = ref 0 in
   let ctx =
     {
       output = Buffer.add_string buf;
       get_unique_label = get_unique_label count;
       is_64_bit = false;
+      set_min_index = (fun a -> min_index := a);
+      get_min_index = (fun () -> !min_index);
     }
   in
   ctx.output ".globl _main\n";

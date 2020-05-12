@@ -128,14 +128,12 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
       | ArrayType (child_type, size) ->
           let _, temp_loc, var_map = allocate_stack ctx var_map 4 in
           output ("movl    %eax, " ^ temp_loc ^ "\n");
-          let t2 = generate_expression ctx var_map exp2 in
-          ignore t2;
-          output
-            ( "imul    $"
-            ^ string_of_int (get_data_size child_type)
-            ^ ", %eax # nidex array index\n" );
+          generate_expression ctx var_map exp2 |> ignore;
           output ("movl    " ^ temp_loc ^ ", %ecx\n");
-          output "addl    %ecx, %eax\n";
+          output
+            ( "leal    (%ecx, %eax, "
+            ^ string_of_int (get_data_size child_type)
+            ^ "), %eax\n" );
           if not (is_type_array child_type) then
             output "movl    (%eax), %eax# index array end (value)\n"
           else output " # index array end (addr, already in eax)\n";
@@ -174,14 +172,12 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
             allocate_stack ctx var_map (get_data_size (PointerType IntType))
           in
           output ("movl    %eax, " ^ temp_loc ^ "\n");
-          let t2 = generate_expression ctx var_map exp2 in
-          ignore t2;
-          output
-            ( "imul    $"
-            ^ string_of_int (get_data_size child_type)
-            ^ ", %eax # index array index\n" );
+          generate_expression ctx var_map exp2 |> ignore;
           output ("movl    " ^ temp_loc ^ ", %ecx\n");
-          output "addl    %ecx, %eax\n";
+          output
+            ( "leal    (%ecx, %eax, "
+            ^ string_of_int (get_data_size child_type)
+            ^ "), %eax\n" );
           PointerType child_type
       | _ -> raise (CodeGenError "Expecting an array type in ArrayIndexExp.") )
   | AddressOfExp _ ->
@@ -303,14 +299,13 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
           if is_type_array element_type then
             raise (CodeGenError "Only 1-D array is assignable.")
           else generate_expression ctx var_map exp2 |> ignore;
-          output
-            ( "imul    $"
-            ^ string_of_int (get_data_size element_type)
-            ^ ", %eax  # array assign index\n" );
           output ("movl    " ^ temp_loc ^ ", %ecx\n");
-          output "addl    %eax, %ecx\n";
+          output
+            ( "leal    (%ecx, %eax, "
+            ^ string_of_int (get_data_size element_type)
+            ^ "), %eax\n" );
           (* Reuse the temp_loc here, since it's already popped. *)
-          output ("movl    %ecx, " ^ temp_loc ^ "\n");
+          output ("movl    %eax, " ^ temp_loc ^ "\n");
           generate_expression ctx var_map exp_r |> ignore;
           output ("movl    " ^ temp_loc ^ ", %ecx\n");
           output "movl    %eax, (%ecx) # array assign end\n";

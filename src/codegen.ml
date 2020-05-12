@@ -62,8 +62,8 @@ let remove_function_call_padding (ctx : context_t) : unit =
  * deallocating objects allocated in the inner scope(s) *)
 let generate_update_esp (ctx : context_t) (var_map : var_map_t) : unit =
   (* ctx.output "movl    %ebp, %eax\n";
-  ctx.output ("addl    $" ^ string_of_int var_map.index ^ ",  %eax\n");
-  ctx.output "movl    %eax, %esp\n" *)
+     ctx.output ("addl    $" ^ string_of_int var_map.index ^ ",  %eax\n");
+     ctx.output "movl    %eax, %esp\n" *)
   ()
 
 (* Generate code for calling a function. This includes adding padding for
@@ -169,16 +169,19 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
       let t = generate_expression ctx var_map exp1 in
       match t with
       | ArrayType (child_type, size) ->
-          output "pushl    %eax # index array addr\n";
+          (* Any pointer has the same size. *)
+          let _, temp_loc, var_map =
+            allocate_stack ctx var_map (get_data_size (PointerType IntType))
+          in
+          output ("movl    %eax, " ^ temp_loc ^ "\n");
           let t2 = generate_expression ctx var_map exp2 in
           ignore t2;
           output
             ( "imul    $"
             ^ string_of_int (get_data_size child_type)
             ^ ", %eax # index array index\n" );
-          output "popl    %ecx\n";
-          output "addl    %eax, %ecx\n";
-          output "movl    %ecx, %eax\n";
+          output ("movl    " ^ temp_loc ^ ", %ecx\n");
+          output "addl    %ecx, %eax\n";
           PointerType child_type
       | _ -> raise (CodeGenError "Expecting an array type in ArrayIndexExp.") )
   | AddressOfExp _ ->
@@ -291,7 +294,10 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
   | AssignExp (ArrayIndexExp (exp1, exp2), exp_r) -> (
       (* TODO Remove ruplicate code with the other ArrayIndexExp code. *)
       let t = generate_expression ctx var_map exp1 in
-      output "pushl    %eax # array assign addr\n";
+      let _, temp_loc, var_map =
+        allocate_stack ctx var_map (get_data_size (PointerType IntType))
+      in
+      output ("movl    %eax, " ^ temp_loc ^ "    #array assign addr\n");
       match t with
       | ArrayType (element_type, size) ->
           if is_type_array element_type then
@@ -301,11 +307,12 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
             ( "imul    $"
             ^ string_of_int (get_data_size element_type)
             ^ ", %eax  # array assign index\n" );
-          output "popl    %ecx\n";
+          output ("movl    " ^ temp_loc ^ ", %ecx\n");
           output "addl    %eax, %ecx\n";
-          output "pushl    %ecx\n";
+          (* Reuse the temp_loc here, since it's already popped. *)
+          output ("movl    %ecx, " ^ temp_loc ^ "\n");
           generate_expression ctx var_map exp_r |> ignore;
-          output "popl    %ecx\n";
+          output ("movl    " ^ temp_loc ^ ", %ecx\n");
           output "movl    %eax, (%ecx) # array assign end\n";
           element_type
       | a ->
@@ -458,18 +465,21 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
   | StatementItem (CompoundStatement items) ->
       (* Entering a new scope, so clear the cur_scope_vars, but we ignore the inner var_map returned. *)
       generate_block_statements ctx
-          { var_map with cur_scope_vars = VarMap.empty }
-          items |> ignore;
+        { var_map with cur_scope_vars = VarMap.empty }
+        items
+      |> ignore;
       var_map
   | DeclareItem (DeclareStatement (data_type, a, exp_opt)) -> (
       ( match exp_opt with
       | None -> output "movl    $0, %eax\n"
       | Some exp -> generate_expression ctx var_map exp |> ignore );
       (* allocate the data block on stack. *)
-      let start_offset, _, var_map = allocate_stack ctx var_map (get_data_size data_type) in
+      let start_offset, _, var_map =
+        allocate_stack ctx var_map (get_data_size data_type)
+      in
       (* output ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
-      (* Start from the lower address. *)
-      let start_offset = var_map.index - get_data_size data_type in *)
+         (* Start from the lower address. *)
+         let start_offset = var_map.index - get_data_size data_type in *)
       output ("movl    %eax, " ^ string_of_int start_offset ^ "(%ebp)\n");
       match VarMap.find_opt a var_map.cur_scope_vars with
       | Some (_, _) ->
@@ -496,7 +506,8 @@ let generate_function (ctx : context_t) (f : function_t) : var_map_t =
     | [] -> var_map
     | a :: r ->
         generate_f_var_map
-          { var_map with
+          {
+            var_map with
             (* TODO We assumed args are always int. *)
             vars = VarMap.add a (index, IntType) var_map.vars;
             break_label = "";
@@ -537,13 +548,15 @@ let generate_function (ctx : context_t) (f : function_t) : var_map_t =
           in
           let var_map = generate_f_var_map var_map fname params 8 in
           (* The block statements will be in the temporary buffer fun_buf. *)
-          let var_map = {var_map with function_return_label = return_label } in
+          let var_map = { var_map with function_return_label = return_label } in
           let res = generate_block_statements ctx var_map items in
-          output ("addl    $" ^ string_of_int (ctx.get_min_index ()) ^ ", %esp\n");
+          output
+            ("addl    $" ^ string_of_int (ctx.get_min_index ()) ^ ", %esp\n");
           output (Buffer.contents fun_buf);
           (* Return logic *)
           output (return_label ^ ":\n");
-          output ("addl    $" ^ string_of_int (-(ctx.get_min_index ())) ^ ", %esp\n");
+          output
+            ("addl    $" ^ string_of_int (-ctx.get_min_index ()) ^ ", %esp\n");
           output "movl    %ebp, %esp\npop    %ebp\n";
           output "ret\n";
           res )

@@ -48,7 +48,9 @@ run_test()  {
     echo "*********** ( Failed testing $cc_file, expecting $result, actual $actual_result ) "
     failed_tests="$failed_tests ( Failed testing $cc_file, expecting $result, actual $actual_result ) "
   fi
-  if [ $expected_output != "" ]; then
+  if [ -z $expected_output ]; then
+    echo "skipping expected_output since it's unset."
+  else
     if [ $expected_output != "$std_output" ]; then
       echo "*********** ( Failed testing $cc_file, expecting std output $expected_output, actual $std_output ) "
       failed_tests="$failed_tests ( Failed testing $cc_file, expecting std output $expected_output, actual $std_output ) "

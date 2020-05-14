@@ -35,8 +35,12 @@ let rec print_expression spaces exp =
       String.make spaces ' ' ^ "ArrayIndex:\n"
       ^ print_expression (spaces + 1) arr
       ^ print_expression (spaces + 1) index
-  | DereferenceExp (exp) -> String.make spaces ' ' ^ "PointerDereference:\n" ^ print_expression (spaces + 1) exp
-  | AddressOfExp (exp) -> String.make spaces ' ' ^ "AddressOf:\n" ^ print_expression (spaces + 1) exp
+  | DereferenceExp exp ->
+      String.make spaces ' ' ^ "PointerDereference:\n"
+      ^ print_expression (spaces + 1) exp
+  | AddressOfExp exp ->
+      String.make spaces ' ' ^ "AddressOf:\n"
+      ^ print_expression (spaces + 1) exp
   | ConstantIntExp n ->
       String.make spaces ' ' ^ "IntegerExpression: " ^ string_of_int n ^ "\n"
   | ConstantCharExp n ->
@@ -142,9 +146,10 @@ and print_ast (ast : program_t) : string =
     match st with
     | DeclareStatement (t, a, None) ->
         String.make spaces ' ' ^ "Declare Statement of " ^ a ^ " type: "
-        ^ (print_data_type t) ^ "\n"
+        ^ print_data_type t ^ "\n"
     | DeclareStatement (t, a, Some exp) ->
-        String.make spaces ' ' ^ "Declare and Init Statement of " ^ a ^ " type: " ^ (print_data_type t)  ^ "\n"
+        String.make spaces ' ' ^ "Declare and Init Statement of " ^ a
+        ^ " type: " ^ print_data_type t ^ "\n"
         ^ print_expression (spaces + 1) exp
   and print_block_item spaces item =
     match item with
@@ -223,10 +228,10 @@ let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
       | r2 -> (VarExp a, r2) )
   | Multiplication :: r ->
       let factor, r = parse_factor r in
-      DereferenceExp(factor), r
+      (DereferenceExp factor, r)
   | Address :: r ->
       let factor, r = parse_factor r in
-      AddressOfExp(factor), r
+      (AddressOfExp factor, r)
   | Negation :: r ->
       let exp, left = parse_factor r in
       (NegateOp exp, left)
@@ -538,7 +543,4 @@ let get_ast (tokens : token_t list) : program_t =
   let program, left_tokens = parse_program tokens in
   program
 
-let _ =
-  let ast = get_ast (parse_tokens (read_file_content "test.cc")) in
-  print_endline "Parse ast complete.";
-  Printf.printf "\nParsed AST: \n%s" (print_ast ast)
+

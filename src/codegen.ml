@@ -3,9 +3,12 @@ open Parser
 open Util
 open Type
 open Typeutil
+open Codegen_util
+
 module VarMap = Map.Make (String)
 
 exception CodeGenError of string
+
 
 type var_map_t = {
   vars : (int * data_type_t) VarMap.t;
@@ -21,7 +24,7 @@ type var_map_t = {
 type context_t = {
   output : string -> unit;
   get_unique_label : string -> string;
-  is_64_bit : bool;
+  is_32_bit : bool;
   (* Used to store the maximum (minimum since it's negative) index. We will
    * use this to allocate stack at once at the beginning of a function.
    * Temporary variables may also be allocated here so that we don't have to
@@ -49,22 +52,24 @@ let allocate_stack (ctx : context_t) (vars : var_map_t) (bytes : int) :
 (* Hacky solution per Nora's article to add padding so that function stack is 16
  * byte aligned. This is for MacOs only. *)
 let add_function_call_padding (ctx : context_t) (num_args : int) : unit =
-  ctx.output "movl    %esp, %eax\n";
-  (* TODO assumed that function param is always int *)
-  ctx.output ("subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
-  ctx.output "xorl %edx, %edx\nmovl $0x20, %ecx\nidivl %ecx\n";
-  ctx.output "subl %edx, %esp\npushl %edx\n"
+  if ctx.is_32_bit then (
+    ctx.output "movl    %esp, %eax\n";
+    (* TODO assumed that function param is always int *)
+    ctx.output ("subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
+    ctx.output "xorl %edx, %edx\nmovl $0x20, %ecx\nidivl %ecx\n";
+    ctx.output "subl %edx, %esp\npushl %edx\n" )
+  else (
+    (* 64 bit *)
+    ctx.output "movl    %rsp, %rax\n";
+    (* TODO assumed that function param is always 8 bytes *)
+    let args_on_stack = if num_args > 6 then num_args - 6 else 0 in
+    ctx.output ("subq $" ^ string_of_int (8 * (args_on_stack + 1)) ^ ", %rax\n");
+    ctx.output "xorq %rdx, %rdx\nmovq $0x20, %rcx\nidivl %rcx\n";
+    ctx.output "subq %rdx, %rsp\npushq %rdx\n" )
 
 let remove_function_call_padding (ctx : context_t) : unit =
-  ctx.output "popl %edx\naddl %edx, %esp\n"
-
-(* Injected after certain jump labels to refresh the esp, this is like
- * deallocating objects allocated in the inner scope(s) *)
-let generate_update_esp (ctx : context_t) (var_map : var_map_t) : unit =
-  (* ctx.output "movl    %ebp, %eax\n";
-     ctx.output ("addl    $" ^ string_of_int var_map.index ^ ",  %eax\n");
-     ctx.output "movl    %eax, %esp\n" *)
-  ()
+  if ctx.is_32_bit then ctx.output "popl %edx\naddl %edx, %esp\n"
+  else ctx.output "popq %rdx\naddl %rdx, %rsp\n"
 
 (* Generate code for calling a function. This includes adding padding for
  * alignment, pushing parameters, remove padding afterwards, etc.*)
@@ -85,6 +90,32 @@ let rec generate_f_call ctx var_map fname exps =
         helper var_map fname r num_args
   in
   helper var_map fname exps (List.length exps)
+
+(* Generate code for calling a function for 64 assmebly. This includes adding
+ * padding for alignment, pushing parameters, remove padding afterwards, etc.*)
+and generate_f_call_64 ctx var_map fname exps =
+  add_function_call_padding ctx (List.length exps);
+  (* registers is the available registers that can be used to store the function
+    * arguments. This feature is a new feature in the x86-64 calling convention. *)
+  let rec helper var_map fname exps registers num_args =
+    match exps with
+    | [] ->
+        ctx.output ("call    _" ^ fname ^ "\n");
+        (* Function returned, remove arguments from stack. *)
+        (* TODO assumed that function param is always int *)
+        (* Remove the padding *)
+        remove_function_call_padding ctx
+    | a :: r -> (
+        generate_expression ctx var_map a |> ignore;
+        match registers with
+        | hd :: tl ->
+            ctx.output ("movq    %rax, " ^ hd ^ "\n");
+            helper var_map fname r tl num_args
+        | [] ->
+            ctx.output "pushq    %rax\n";
+            helper var_map fname r [] num_args )
+  in
+  helper var_map fname exps ["%rdi"; "%rsi"; "%rdx"; "%rcx"; "%r8"; "r9"] (List.length exps)
 
 (* Generates the assembly code for a specific expression. *)
 and generate_expression (ctx : context_t) (var_map : var_map_t)
@@ -371,7 +402,6 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
         (StatementItem st)
       |> ignore;
       output (continue_label ^ ":\n");
-      generate_update_esp ctx var_map;
       ( match exp3_opt with
       | None -> ()
       | Some exp ->
@@ -379,7 +409,6 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
           () );
       output ("jmp    " ^ cond_label ^ "\n");
       output (end_label ^ ":\n");
-      generate_update_esp ctx var_map;
       var_map
   | StatementItem (ForDeclStatement (declare, exp2, exp3_opt, st)) ->
       let cond_label = get_unique_label "_forcond" in
@@ -405,13 +434,11 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
         (StatementItem st)
       |> ignore;
       output (continue_label ^ ":\n");
-      generate_update_esp ctx condition_var_map;
       ( match exp3_opt with
       | None -> ()
       | Some exp -> generate_expression ctx condition_var_map exp |> ignore );
       output ("jmp    " ^ cond_label ^ "\n");
       output (end_label ^ ":\n");
-      generate_update_esp ctx condition_var_map;
       var_map
   | StatementItem BreakStatement ->
       if var_map.break_label = "" then
@@ -429,7 +456,6 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       let break_label = end_label in
       let continue_label = cond_label in
       output (cond_label ^ ":\n");
-      generate_update_esp ctx var_map;
       generate_expression ctx var_map exp |> ignore;
       output ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
       generate_block_item ctx
@@ -438,7 +464,6 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       |> ignore;
       output ("jmp    " ^ cond_label ^ "\n");
       output (end_label ^ ":\n");
-      generate_update_esp ctx var_map;
       var_map
   | StatementItem (DoStatement (st, exp)) ->
       let begin_label = get_unique_label "_dobegin" in
@@ -451,11 +476,9 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
         (StatementItem st)
       |> ignore;
       output (continue_label ^ ":\n");
-      generate_update_esp ctx var_map;
       generate_expression ctx var_map exp |> ignore;
       output ("cmpl    $0, %eax\njne    " ^ begin_label ^ "\n");
       output (end_label ^ ":\n");
-      generate_update_esp ctx var_map;
       var_map
   | StatementItem (CompoundStatement items) ->
       (* Entering a new scope, so clear the cur_scope_vars, but we ignore the inner var_map returned. *)
@@ -566,7 +589,7 @@ let generate_assembly (ast : program_t) : string =
     {
       output = Buffer.add_string buf;
       get_unique_label = get_unique_label count;
-      is_64_bit = false;
+      is_32_bit = true;
       set_min_index = (fun a -> min_index := a);
       get_min_index = (fun () -> !min_index);
     }

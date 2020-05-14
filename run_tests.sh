@@ -10,7 +10,7 @@ compile_code() {
     echo "Failed to copy file test/$cc_file"
     exit 1
   fi
-  ocamlopt -o cc_ocaml ../src/lexer.ml ../src/type.ml ../src/typeutil.ml ../src/parser.ml ../src/util.ml ../src/codegen.ml ../src/main.ml
+  ocamlopt -o cc_ocaml ../src/lexer.ml ../src/type.ml ../src/typeutil.ml ../src/parser.ml ../src/util.ml ../src/codegen_util.ml ../src/codegen.ml ../src/main.ml
   ret=$?
   if [[ $ret -ne 0 ]]; then
     echo "Compiling failed."

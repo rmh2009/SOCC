@@ -12,13 +12,6 @@ let rec print_data_type (t : data_type_t) : string =
   | PointerType t -> "Pointer of " ^ print_data_type t
   | UnknownType -> "UnknownType"
 
-let rec get_data_size (t : data_type_t) : int =
-  match t with
-  | IntType -> 4
-  | ArrayType (t2, size) -> size * get_data_size t2
-  | PointerType _ -> 4 (* TODO 32 bit assembly limit *)
-  | _ -> TokenError "Unsupported data type." |> raise
-
 let parse_data_type (tokens : token_t list) :
     string * data_type_t * token_t list =
   let rec helper name_opt cur_type tokens =

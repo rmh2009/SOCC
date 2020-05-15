@@ -63,6 +63,9 @@ run_all_tests() {
 run_test "binary_operators_expect_0.cc"  0
 run_test "binary_operators_expect_1.cc"  1 
 run_test "binary_operators_expect_9.cc"  9 
+run_test "division_test_expect_3.cc"  3 
+run_test "multiply_test_expect_15.cc"  15 
+
 run_test "compound_statement2_expect_1.cc"  1 
 run_test "compound_statement3_expect_3.cc"  3
 run_test "compound_statement4_expect_3.cc" 3

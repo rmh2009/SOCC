@@ -6,6 +6,7 @@ type data_type_t =
   | ArrayType of data_type_t * int
   | PointerType of data_type_t
   | UnknownType
+  | VoidType
 
 (* Expression is further decomposed into factors and terms. Factor is the smallest group
  * consisting of constants, unary operator or grouped expressions.

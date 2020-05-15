@@ -4,11 +4,10 @@ open Util
 open Type
 open Typeutil
 open Codegen_util
-
 module VarMap = Map.Make (String)
+module CG = MakeCodeGen (System32Bit)
 
 exception CodeGenError of string
-
 
 type var_map_t = {
   vars : (int * data_type_t) VarMap.t;
@@ -46,7 +45,7 @@ let allocate_stack (ctx : context_t) (vars : var_map_t) (bytes : int) :
   in
   if ctx.get_min_index () > new_index then ctx.set_min_index new_index else ();
   ( new_index,
-    string_of_int new_index ^ "(%esp)",
+    string_of_int new_index ^ "(%ebp)",
     { vars with index = new_index } )
 
 (* Hacky solution per Nora's article to add padding so that function stack is 16
@@ -96,7 +95,7 @@ let rec generate_f_call ctx var_map fname exps =
 and generate_f_call_64 ctx var_map fname exps =
   add_function_call_padding ctx (List.length exps);
   (* registers is the available registers that can be used to store the function
-    * arguments. This feature is a new feature in the x86-64 calling convention. *)
+     * arguments. This feature is a new feature in the x86-64 calling convention. *)
   let rec helper var_map fname exps registers num_args =
     match exps with
     | [] ->
@@ -115,21 +114,25 @@ and generate_f_call_64 ctx var_map fname exps =
             ctx.output "pushq    %rax\n";
             helper var_map fname r [] num_args )
   in
-  helper var_map fname exps ["%rdi"; "%rsi"; "%rdx"; "%rcx"; "%r8"; "r9"] (List.length exps)
+  helper var_map fname exps
+    [ "%rdi"; "%rsi"; "%rdx"; "%rcx"; "%r8"; "r9" ]
+    (List.length exps)
 
 (* Generates the assembly code for a specific expression. *)
 and generate_expression (ctx : context_t) (var_map : var_map_t)
     (exp : expression_t) : data_type_t =
   let output = ctx.output in
+  let gen_command a b = CG.gen_command a b |> output in
   let get_unique_label = ctx.get_unique_label in
+  let pvoid = PointerType VoidType in
   let generate_relational_expression output command exp1 exp2 : data_type_t =
     generate_expression ctx var_map exp1 |> ignore;
-    let _, temp_loc, var_map = allocate_stack ctx var_map 4 in
-    output ("movl    %eax, " ^ temp_loc ^ "\n");
+    let off, _, var_map = allocate_stack ctx var_map 4 in
+    gen_command (Mov (Reg AX, Disp (off, BP))) IntType;
     generate_expression ctx var_map exp2 |> ignore;
-    output ("movl    " ^ temp_loc ^ ", %ecx\n");
-    output "cmpl   %eax, %ecx\n";
-    output "movl   $0, %eax\n";
+    gen_command (Mov (Disp (off, BP), Reg CX)) IntType;
+    gen_command (Comp (Reg AX, Reg CX)) IntType;
+    gen_command (Mov (Imm 0, Reg AX)) IntType;
     output (command ^ "   %al\n");
     IntType
   in
@@ -139,13 +142,10 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
       | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
       | Some (offset, t) ->
           ( match t with
-          | IntType ->
-              output ("movl  " ^ string_of_int offset ^ "(%ebp),  %eax\n")
+          | IntType -> gen_command (Mov (Disp (offset, BP), Reg AX)) IntType
           | ArrayType (_, _) ->
-              output "movl    %ebp, %eax\n";
-              output ("addl  $" ^ string_of_int offset ^ ", %eax\n")
-          | PointerType _ ->
-              output ("movl  " ^ string_of_int offset ^ "(%ebp),  %eax\n")
+              gen_command (Lea (Disp (offset, BP), Reg AX)) pvoid
+          | PointerType _ -> gen_command (Mov (Disp (offset, BP), Reg AX)) pvoid
           | x ->
               CodeGenError ("Unsupported type in VarExp." ^ print_data_type x)
               |> raise );
@@ -157,16 +157,17 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
       let t = generate_expression ctx var_map exp1 in
       match t with
       | ArrayType (child_type, size) ->
-          let _, temp_loc, var_map = allocate_stack ctx var_map 4 in
-          output ("movl    %eax, " ^ temp_loc ^ "\n");
+          let off, temp_loc, var_map =
+            allocate_stack ctx var_map (CG.get_data_size pvoid)
+          in
+          gen_command (Mov (Reg AX, Disp (off, BP))) pvoid;
           generate_expression ctx var_map exp2 |> ignore;
-          output ("movl    " ^ temp_loc ^ ", %ecx\n");
-          output
-            ( "leal    (%ecx, %eax, "
-            ^ string_of_int (get_data_size child_type)
-            ^ "), %eax\n" );
+          gen_command (Mov (Disp (off, BP), Reg CX)) pvoid;
+          gen_command
+            (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg AX))
+            pvoid;
           if not (is_type_array child_type) then
-            output "movl    (%eax), %eax# index array end (value)\n"
+            gen_command (Mov (RegV AX, Reg AX)) child_type
           else output " # index array end (addr, already in eax)\n";
           child_type
       | _ ->
@@ -178,7 +179,7 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
       let t = generate_expression ctx var_map exp in
       if not (is_type_pointer t) then
         raise (CodeGenError "Only pointer type can be dereferenced.")
-      else output "movl    (%eax), %eax\n";
+      else gen_command (Mov (RegV AX, Reg AX)) t;
       match t with
       | PointerType inner -> inner
       | _ -> raise (CodeGenError "Expecting a pointer type in DereferenceExp.")
@@ -189,8 +190,7 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
       | Some (offset, t) -> (
           match t with
           | IntType | ArrayType (_, _) | PointerType _ ->
-              output
-                ("movl  %ebp, %eax\naddl $" ^ string_of_int offset ^ ",  %eax\n");
+              gen_command (Lea (Disp (offset, BP), Reg AX)) pvoid;
               PointerType t
           | _ -> raise (CodeGenError "Illegal type in AddressOfExp.") ) )
   | AddressOfExp (ArrayIndexExp (exp1, exp2)) -> (
@@ -198,74 +198,101 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
       let t = generate_expression ctx var_map exp1 in
       match t with
       | ArrayType (child_type, size) ->
-          (* Any pointer has the same size. *)
-          let _, temp_loc, var_map =
-            allocate_stack ctx var_map (get_data_size (PointerType IntType))
+          let off, temp_loc, var_map =
+            allocate_stack ctx var_map (CG.get_data_size pvoid)
           in
-          output ("movl    %eax, " ^ temp_loc ^ "\n");
+          gen_command (Mov (Reg AX, Disp (off, BP))) pvoid;
           generate_expression ctx var_map exp2 |> ignore;
-          output ("movl    " ^ temp_loc ^ ", %ecx\n");
-          output
-            ( "leal    (%ecx, %eax, "
-            ^ string_of_int (get_data_size child_type)
-            ^ "), %eax\n" );
+          gen_command (Mov (Disp (off, BP), Reg CX)) pvoid;
+          gen_command
+            (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg AX))
+            pvoid;
           PointerType child_type
       | _ -> raise (CodeGenError "Expecting an array type in ArrayIndexExp.") )
   | AddressOfExp _ ->
       raise (CodeGenError "Can only take address of array element or varaible.")
   | ConstantIntExp n ->
-      output ("movl    $" ^ string_of_int n ^ ", %eax\n");
+      gen_command (Mov (Imm n, Reg AX)) IntType;
       IntType
   | FunctionCallExp (fname, exps) ->
       generate_f_call ctx var_map fname exps;
       (* TODO assume function always return int. *)
       IntType
   | NegateOp exp ->
-      generate_expression ctx var_map exp |> ignore;
-      output "neg    %eax\n";
-      IntType
+      let t = generate_expression ctx var_map exp in
+      gen_command (Neg (Reg AX)) t;
+      t
   | LogicalNegateOp exp ->
-      generate_expression ctx var_map exp |> ignore;
-      output "cmpl    $0, %eax\nmovl     $0, %eax\nsete    %al\n";
-      IntType
+      let t = generate_expression ctx var_map exp in
+      gen_command (Comp (Imm 0, Reg AX)) t;
+      gen_command (Mov (Imm 0, Reg AX)) IntType;
+      (* zero %ax completely. *)
+      output "sete   %al\n";
+      t
   | ComplementOp exp ->
-      generate_expression ctx var_map exp |> ignore;
-      output "not    %eax\n";
-      IntType
+      let t = generate_expression ctx var_map exp in
+      gen_command (Not (Reg AX)) t;
+      t
   | GroupedExpression exp -> generate_expression ctx var_map exp
   | ConstantCharExp a -> raise (CodeGenError "Char nimplemented")
   | ConstantStringExp a -> raise (CodeGenError "String unimplemented")
   | ConstantFloatExp a -> raise (CodeGenError "Float unimplemented")
   | AdditionExp (exp1, exp2) ->
-      generate_expression ctx var_map exp1 |> ignore;
-      output "push    %eax\n";
-      let t = generate_expression ctx var_map exp2 in
-      output "pop    %ecx\n";
-      output "addl    %ecx, %eax\n";
-      t
+      let t1 = generate_expression ctx var_map exp1 in
+      let off, _, var_map = allocate_stack ctx var_map (CG.get_data_size t1) in
+      gen_command (Mov (Reg AX, Disp (off, BP))) t1;
+      let t2 = generate_expression ctx var_map exp2 in
+      gen_command (Mov (Disp (off, BP), Reg CX)) t1;
+      if CG.get_data_size t1 != CG.get_data_size t2 then
+        raise
+          (CodeGenError
+             ( "t1 and t2 not equal in binary operation: " ^ print_data_type t1
+             ^ ", " ^ print_data_type t2 ));
+      gen_command (Add (Reg CX, Reg AX)) t1;
+      t1
   | MinusExp (exp1, exp2) ->
-      generate_expression ctx var_map exp2 |> ignore;
-      output "push    %eax\n";
-      let t = generate_expression ctx var_map exp1 in
-      output "pop    %ecx\n";
-      output "subl    %ecx, %eax\n";
-
-      t
+      let t2 = generate_expression ctx var_map exp2 in
+      let off, _, var_map = allocate_stack ctx var_map (CG.get_data_size t2) in
+      gen_command (Mov (Reg AX, Disp (off, BP))) t2;
+      let t1 = generate_expression ctx var_map exp1 in
+      gen_command (Mov (Disp (off, BP), Reg CX)) t1;
+      if CG.get_data_size t1 != CG.get_data_size t2 then
+        raise
+          (CodeGenError
+             ( "t1 and t2 not equal in binary operation: " ^ print_data_type t1
+             ^ ", " ^ print_data_type t2 ));
+      gen_command (Sub (Reg CX, Reg AX)) t1;
+      t1
   | MultiExp (exp1, exp2) ->
-      generate_expression ctx var_map exp1 |> ignore;
-      output "push    %eax\n";
-      let t = generate_expression ctx var_map exp2 in
-      output "pop    %ecx\n";
-      output "imul    %ecx, %eax\n";
-      t
+      let t1 = generate_expression ctx var_map exp1 in
+      let off, _, var_map = allocate_stack ctx var_map (CG.get_data_size t1) in
+      gen_command (Mov (Reg AX, Disp (off, BP))) t1;
+      let t2 = generate_expression ctx var_map exp2 in
+      gen_command (Mov (Disp (off, BP), Reg CX)) t1;
+      if CG.get_data_size t1 != CG.get_data_size t2 then
+        raise
+          (CodeGenError
+             ( "t1 and t2 not equal in binary operation: " ^ print_data_type t1
+             ^ ", " ^ print_data_type t2 ));
+      gen_command (Mul (Reg CX, Reg AX)) t1;
+      t1
   | DivideExp (exp1, exp2) ->
-      generate_expression ctx var_map exp2 |> ignore;
-      output "push    %eax\n";
-      let t = generate_expression ctx var_map exp1 in
-      output "cdq\n";
-      output "pop    %ecx\n";
-      output "idvl    %ecx\n";
-      t
+      let t2 = generate_expression ctx var_map exp2 in
+      let off, _, var_map = allocate_stack ctx var_map (CG.get_data_size t2) in
+      gen_command (Mov (Reg AX, Disp (off, BP))) t2;
+      let t1 = generate_expression ctx var_map exp1 in
+      if CG.get_data_size t1 != CG.get_data_size t2 then
+        raise
+          (CodeGenError
+             ( "t1 and t2 not equal in binary operation: " ^ print_data_type t1
+             ^ ", " ^ print_data_type t2 ));
+
+      (* need to sign extend eax to 64 bit edx:eax if t1 is 32bit, or sign extend rax to 128 bit rdx:rax if 64bit *)
+      if CG.get_data_size t1 = 4 then output "cdq\n" else output "cqto";
+
+      gen_command (Mov (Disp (off, BP), Reg CX)) t1;
+      gen_command (Div (Reg CX)) t1;
+      t1
   | EqualExp (exp1, exp2) ->
       generate_relational_expression output "sete" exp1 exp2
   | NotEqualExp (exp1, exp2) ->
@@ -279,68 +306,90 @@ and generate_expression (ctx : context_t) (var_map : var_map_t)
   | LessExp (exp1, exp2) ->
       generate_relational_expression output "setl" exp1 exp2
   | OrExp (exp1, exp2) ->
-      generate_expression ctx var_map exp1 |> ignore;
+      let t1 = generate_expression ctx var_map exp1 in
       let clause_label = get_unique_label "_clause2" in
       let end_label = get_unique_label "_end" in
-      output ("cmpl    $0, %eax\nje " ^ clause_label ^ "\n");
-      output ("movl    $1, %eax\njmp " ^ end_label ^ "\n");
+      gen_command (Comp (Imm 0, Reg AX)) t1;
+      gen_command (Je clause_label) IntType;
+      gen_command (Mov (Imm 1, Reg AX)) IntType;
+      (* always output int *)
+      gen_command (Jmp end_label) IntType;
       output (clause_label ^ ":\n");
-      generate_expression ctx var_map exp2 |> ignore;
-      output "cmpl    $0, %eax\nmovl    $0, %eax\nsetne    %al\n";
+      let t2 = generate_expression ctx var_map exp2 in
+      gen_command (Comp (Imm 0, Reg AX)) t2;
+      gen_command (Mov (Imm 0, Reg AX)) IntType;
+      (* always output int *)
+      output "setne    %al\n";
       output (end_label ^ ":\n");
       IntType
   | AndExp (exp1, exp2) ->
-      generate_expression ctx var_map exp1 |> ignore;
+      let t1 = generate_expression ctx var_map exp1 in
       let clause_label = get_unique_label "_clause2" in
       let end_label = get_unique_label "_end" in
-      output ("cmpl    $0, %eax\njne " ^ clause_label ^ "\n");
-      output ("movl    $0, %eax\njmp " ^ end_label ^ "\n");
+      gen_command (Comp (Imm 0, Reg AX)) t1;
+      gen_command (Jne clause_label) IntType;
+      gen_command (Mov (Imm 0, Reg AX)) IntType;
+      (* always output int *)
+      gen_command (Jmp end_label) IntType;
       output (clause_label ^ ":\n");
-      generate_expression ctx var_map exp2 |> ignore;
-      output "cmpl    $0, %eax\nmovl    $0, %eax\nsetne    %al\n";
+      let t2 = generate_expression ctx var_map exp2 in
+      gen_command (Comp (Imm 0, Reg AX)) t2;
+      gen_command (Mov (Imm 0, Reg AX)) IntType;
+      (* always output int *)
+      output "setne    %al\n";
       output (end_label ^ ":\n");
       IntType
   | ConditionExp (exp1, exp2, exp3) ->
-      generate_expression ctx var_map exp1 |> ignore;
+      let t1 = generate_expression ctx var_map exp1 in
       let cond_label = get_unique_label "_cond" in
       let cond_end_label = get_unique_label "_condend" in
-      output ("cmpl    $0, %eax\nje    " ^ cond_label ^ "\n");
-      let t = generate_expression ctx var_map exp2 in
-      output ("jmp    " ^ cond_end_label ^ "\n");
+      gen_command (Comp (Imm 0, Reg AX)) t1;
+      gen_command (Je cond_label) IntType;
+      let t2 = generate_expression ctx var_map exp2 in
+      gen_command (Jmp cond_end_label) IntType;
       output (cond_label ^ ":\n");
-      generate_expression ctx var_map exp3 |> ignore;
+      let t3 = generate_expression ctx var_map exp3 in
       output (cond_end_label ^ ":\n");
-      t
+      if CG.get_data_size t2 != CG.get_data_size t3 then
+        raise
+          (CodeGenError
+             ( "t1 and t2 not equal in binary operation: " ^ print_data_type t2
+             ^ ", " ^ print_data_type t3 ));
+      t2
   | AssignExp (VarExp a, exp) -> (
       match VarMap.find_opt a var_map.vars with
       | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
       | Some (offset, t) ->
           let t = generate_expression ctx var_map exp in
-          output ("movl  %eax, " ^ string_of_int offset ^ "(%ebp)\n");
+          gen_command (Mov (Reg AX, Disp (offset, BP))) t;
           t )
   | AssignExp (ArrayIndexExp (exp1, exp2), exp_r) -> (
       (* TODO Remove ruplicate code with the other ArrayIndexExp code. *)
       let t = generate_expression ctx var_map exp1 in
-      let _, temp_loc, var_map =
-        allocate_stack ctx var_map (get_data_size (PointerType IntType))
+      let offset, _, var_map =
+        allocate_stack ctx var_map (CG.get_data_size (PointerType IntType))
       in
-      output ("movl    %eax, " ^ temp_loc ^ "    #array assign addr\n");
+      gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
+      output "# array assign addr above\n";
       match t with
       | ArrayType (element_type, size) ->
           if is_type_array element_type then
             raise (CodeGenError "Only 1-D array is assignable.")
-          else generate_expression ctx var_map exp2 |> ignore;
-          output ("movl    " ^ temp_loc ^ ", %ecx\n");
-          output
-            ( "leal    (%ecx, %eax, "
-            ^ string_of_int (get_data_size element_type)
-            ^ "), %eax\n" );
-          (* Reuse the temp_loc here, since it's already popped. *)
-          output ("movl    %eax, " ^ temp_loc ^ "\n");
-          generate_expression ctx var_map exp_r |> ignore;
-          output ("movl    " ^ temp_loc ^ ", %ecx\n");
-          output "movl    %eax, (%ecx) # array assign end\n";
-          element_type
+          else
+            let t_index = generate_expression ctx var_map exp2 in
+            gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
+            gen_command
+              (Lea (Index (0, CX, AX, CG.get_data_size element_type), Reg AX))
+              element_type;
+            (* Reuse the temp_loc here, since it's already popped. *)
+            gen_command (Mov (Reg AX, Disp (offset, BP))) element_type;
+            let t_value = generate_expression ctx var_map exp_r in
+            (* get the address to assign to *)
+            gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
+            gen_command (Mov (Reg AX, RegV CX)) element_type;
+            ignore t_index;
+            ignore t_value;
+            element_type
       | a ->
           CodeGenError ("Type is not assignable: " ^ print_data_type a) |> raise
       )
@@ -493,7 +542,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       | Some exp -> generate_expression ctx var_map exp |> ignore );
       (* allocate the data block on stack. *)
       let start_offset, _, var_map =
-        allocate_stack ctx var_map (get_data_size data_type)
+        allocate_stack ctx var_map (CG.get_data_size data_type)
       in
       (* output ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
          (* Start from the lower address. *)

@@ -11,6 +11,7 @@ let rec print_data_type (t : data_type_t) : string =
       "Array of (" ^ print_data_type t ^ ")[" ^ string_of_int size ^ "]"
   | PointerType t -> "Pointer of " ^ print_data_type t
   | UnknownType -> "UnknownType"
+  | VoidType -> "VoidType"
 
 let parse_data_type (tokens : token_t list) :
     string * data_type_t * token_t list =

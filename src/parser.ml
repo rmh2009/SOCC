@@ -48,7 +48,7 @@ let rec print_expression spaces exp =
   | ConstantFloatExp n ->
       String.make spaces ' ' ^ "FloatExpression: " ^ string_of_float n ^ "\n"
   | ConstantStringExp n ->
-      String.make spaces ' ' ^ "IntegerExpression: " ^ n ^ "\n"
+      String.make spaces ' ' ^ "StringExpression: " ^ n ^ "\n"
   | NegateOp exp ->
       String.make spaces ' ' ^ "NegateOp:\n" ^ print_expression (spaces + 1) exp
   | LogicalNegateOp exp ->

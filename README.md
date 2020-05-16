@@ -25,7 +25,7 @@ Implemented features:
 
 Features missing:
  - Support for struct.
- - Data types other than int, such as double/char etc.
+ - Support for float/double.
 
 So far I've been mostly following this article here: https://norasandler.com/2017/11/29/Write-a-Compiler.html. This article stopped at implementing function calls (As of May 2020). After this I implemented a simple type checking system, support for arrays etc. on my own. I plan to keep adding more features gradually and will summarize my solution below.
 

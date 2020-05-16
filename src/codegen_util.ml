@@ -37,35 +37,45 @@ let fail_genutil msg = raise (CodeGenUtilError msg)
 
 let format_commands str_list =
   if List.length str_list = 3 then
-    Printf.sprintf "    %s    %s,%s\n" (List.nth str_list 0) (List.nth str_list 1)
-    (List.nth str_list 2)
+    Printf.sprintf "    %s    %s,%s\n" (List.nth str_list 0)
+      (List.nth str_list 1) (List.nth str_list 2)
   else if List.length str_list = 2 then
     Printf.sprintf "    %s    %s\n" (List.nth str_list 0) (List.nth str_list 1)
   else fail_genutil "expecting 2 or 3 operands."
 
 module type System_t = sig
   val is_64_bit : bool
+
   val format_commands : string list -> string
-  val fail: string -> 'a
+
+  val fail : string -> 'a
 end
 
 module System32Bit : System_t = struct
   let is_64_bit = false
+
   let format_commands = format_commands
+
   let fail = fail_genutil
 end
 
 module System64Bit : System_t = struct
   let is_64_bit = true
+
   let format_commands = format_commands
+
   let fail = fail_genutil
 end
 
 module type CodeGenUtil_t = sig
   val is_64_bit : bool
+
   val is_32_bit : bool
+
   val fun_arg_registers_64 : string list
+
   val get_data_size : data_type_t -> int
+
   val gen_command : command_t -> data_type_t -> string
 end
 
@@ -81,6 +91,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | IntType -> 4
     | ArrayType (t2, size) -> size * get_data_size t2
     | PointerType _ -> if is_64_bit then 8 else 4
+    | CharType -> 1
     | _ -> TokenError "Unsupported data type." |> raise
 
   (* This is the footprint when evaluated after expression, i.e. saved in register. *)
@@ -89,6 +100,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | IntType -> 4
     | ArrayType (t2, size) -> if is_64_bit then 8 else 4
     | PointerType _ -> if is_64_bit then 8 else 4
+    | CharType -> 1
     | _ -> TokenError "Unsupported data type." |> raise
 
   let gen_register (r : register_t) (dtype : data_type_t) =
@@ -96,17 +108,35 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     match r with
     | BP -> if is_64_bit then "%rbp" else "%ebp"
     | SP -> if is_64_bit then "%rsp" else "%esp"
-    | AX -> if dsize = 8 then "%rax" else "%eax"
-    | BX -> if dsize = 8 then "%rbx" else "%ebx"
-    | CX -> if dsize = 8 then "%rcx" else "%ecx"
-    | DX -> if dsize = 8 then "%rdx" else "%edx"
+    | AX ->
+        if dsize = 8 then "%rax"
+        else if dsize = 4 then "%eax"
+        else if dsize = 2 then "%ax"
+        else "%al"
+    | BX ->
+        if dsize = 8 then "%rbx"
+        else if dsize = 4 then "%ebx"
+        else if dsize = 2 then "%bx"
+        else "%bl"
+    | CX ->
+        if dsize = 8 then "%rcx"
+        else if dsize = 4 then "%ecx"
+        else if dsize = 2 then "%cx"
+        else "%cl"
+    | DX ->
+        if dsize = 8 then "%rdx"
+        else if dsize = 4 then "%edx"
+        else if dsize = 2 then "%dx"
+        else "%dl"
 
   let gen_operand (dtype : data_type_t) (op : operand_t) =
-    let pvoid = PointerType(VoidType) in
+    let pvoid = PointerType VoidType in
     match op with
     | Imm a -> "$" ^ string_of_int a
     | Reg r -> gen_register r dtype
-    | RegV r -> "(" ^ gen_register r pvoid ^ ")" (* This is taking the value of an address, so it has to be pointer type. *)
+    | RegV r ->
+        "(" ^ gen_register r pvoid ^ ")"
+        (* This is taking the value of an address, so it has to be pointer type. *)
     | Disp (offset, r) -> Printf.sprintf "%d(%s)" offset (gen_register r pvoid)
     | Index (offset, base, index, step) ->
         Printf.sprintf "%d(%s, %s, %d)" offset (gen_register base pvoid)

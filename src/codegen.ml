@@ -9,8 +9,10 @@ module VarMap = Map.Make (String)
 exception CodeGenError of string
 
 type var_map_t = {
-  vars : (int * data_type_t) VarMap.t;
-  cur_scope_vars : (int * data_type_t) VarMap.t;
+  (* (offset, data_type_t, global_data_label), if the global_data_label exists it means
+   * this references a global data, offset should be ignored. *)
+  vars : (int * data_type_t * string option) VarMap.t;
+  cur_scope_vars : (int * data_type_t * string option) VarMap.t;
   (* index is the current offset of (%esp - %ebp), this is used to statically associate a new
    * variable to its address, which is offset to frame base %ebp. *)
   index : int;
@@ -50,7 +52,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
   let add_function_call_padding (ctx : context_t) (num_args : int) : unit =
     ctx.output "#---------- function call align begin -----\n";
     if CG.is_32_bit then (
-      ctx.output (Printf.sprintf "#---------- %d args on stack -----\n" num_args);
+      ctx.output
+        (Printf.sprintf "#---------- %d args on stack -----\n" num_args);
       ctx.output "    movl    %esp, %eax\n";
       (* TODO assumed that function param is always int *)
       ctx.output ("    subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
@@ -61,7 +64,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       ctx.output "    movq   %rsp, %rax\n";
       (* TODO assumed that function param is always 8 bytes *)
       let args_on_stack = if num_args > 6 then num_args - 6 else 0 in
-      ctx.output (Printf.sprintf "#---------- %d args on stack -----\n" args_on_stack);
+      ctx.output
+        (Printf.sprintf "#---------- %d args on stack -----\n" args_on_stack);
       ctx.output
         ("    subq $" ^ string_of_int (8 * (args_on_stack + 1)) ^ ", %rax\n");
       ctx.output "    xorq %rdx, %rdx\n    movq $0x20, %rcx\n    idivq %rcx\n";
@@ -74,14 +78,18 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       ctx.output ("    addl    $" ^ string_of_int (4 * num_args) ^ ", %esp\n");
       ctx.output "    popl %edx\n    addl %edx, %esp\n" )
     else (
-      if num_args > 6 then (raise (CodeGenError("Does not support more than 6 params in 64 bit mode yet.")));
-      ctx.output "    popq %rdx\n    addq %rdx, %rsp\n")
+      if num_args > 6 then
+        raise
+          (CodeGenError
+             "Does not support more than 6 params in 64 bit mode yet.");
+      ctx.output "    popq %rdx\n    addq %rdx, %rsp\n" )
 
   (* Generate code for calling a function. This includes adding padding for
    * alignment, pushing parameters, remove padding afterwards, etc.*)
   let rec generate_f_call ctx var_map fname exps =
-
-    if List.length exps > 6 then (raise (CodeGenError("Does not support more than 6 params in 64 bit mode yet.")));
+    if List.length exps > 6 then
+      raise
+        (CodeGenError "Does not support more than 6 params in 64 bit mode yet.");
     add_function_call_padding ctx (List.length exps);
     let rec helper var_map fname exps num_args =
       match exps with
@@ -148,7 +156,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     | VarExp a -> (
         match VarMap.find_opt a var_map.vars with
         | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
-        | Some (offset, t) ->
+        | Some (offset, t, _) ->
             ( match t with
             | IntType -> gen_command (Mov (Disp (offset, BP), Reg AX)) IntType
             | ArrayType (_, _) ->
@@ -196,7 +204,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     | AddressOfExp (VarExp a) -> (
         match VarMap.find_opt a var_map.vars with
         | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
-        | Some (offset, t) -> (
+        | Some (offset, t, _) -> (
             match t with
             | IntType | ArrayType (_, _) | PointerType _ ->
                 gen_command (Lea (Disp (offset, BP), Reg AX)) pvoid;
@@ -225,6 +233,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     | ConstantIntExp n ->
         gen_command (Mov (Imm n, Reg AX)) IntType;
         IntType
+    | ConstantCharExp a ->
+        gen_command (Mov (Imm (int_of_char a), Reg AX)) CharType;
+        CharType
+    | ConstantStringExp a -> raise (CodeGenError "String unimplemented")
+    | ConstantFloatExp a -> raise (CodeGenError "Float unimplemented")
     | FunctionCallExp (fname, exps) ->
         if CG.is_32_bit then generate_f_call ctx var_map fname exps
         else generate_f_call_64 ctx var_map fname exps;
@@ -246,9 +259,6 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Not (Reg AX)) t;
         t
     | GroupedExpression exp -> generate_expression ctx var_map exp
-    | ConstantCharExp a -> raise (CodeGenError "Char nimplemented")
-    | ConstantStringExp a -> raise (CodeGenError "String unimplemented")
-    | ConstantFloatExp a -> raise (CodeGenError "Float unimplemented")
     | AdditionExp (exp1, exp2) ->
         let t1 = generate_expression ctx var_map exp1 in
         let off, _, var_map =
@@ -257,12 +267,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Reg AX, Disp (off, BP))) t1;
         let t2 = generate_expression ctx var_map exp2 in
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
-        if CG.get_data_size t1 != CG.get_data_size t2 then
-          raise
-            (CodeGenError
-               ( "t1 and t2 not equal in binary operation: "
-               ^ print_data_type t1 ^ ", " ^ print_data_type t2 ));
-        gen_command (Add (Reg CX, Reg AX)) t1;
+        let larger_t = if CG.get_data_size t1 > CG.get_data_size t2 then
+          t1 else t2 in
+        gen_command (Add (Reg CX, Reg AX)) larger_t;
         t1
     | MinusExp (exp1, exp2) ->
         let t2 = generate_expression ctx var_map exp2 in
@@ -272,12 +279,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Reg AX, Disp (off, BP))) t2;
         let t1 = generate_expression ctx var_map exp1 in
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
-        if CG.get_data_size t1 != CG.get_data_size t2 then
-          raise
-            (CodeGenError
-               ( "t1 and t2 not equal in binary operation: "
-               ^ print_data_type t1 ^ ", " ^ print_data_type t2 ));
-        gen_command (Sub (Reg CX, Reg AX)) t1;
+        let larger_t = if CG.get_data_size t1 > CG.get_data_size t2 then
+          t1 else t2 in
+        gen_command (Sub (Reg CX, Reg AX)) larger_t;
         t1
     | MultiExp (exp1, exp2) ->
         let t1 = generate_expression ctx var_map exp1 in
@@ -308,7 +312,10 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
                ^ print_data_type t1 ^ ", " ^ print_data_type t2 ));
 
         (* need to sign extend eax to 64 bit edx:eax if t1 is 32bit, or sign extend rax to 128 bit rdx:rax if 64bit *)
-        if CG.get_data_size t1 = 4 then output "cdq\n" else output "cqto";
+        let dsize = CG.get_data_size t1 in
+        if dsize = 4 then output "cdq\n"
+        else if dsize = 8 then output "cqto"
+        else raise (CodeGenError "Division of unsupported data type.");
 
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
         gen_command (Div (Reg CX)) t1;
@@ -379,7 +386,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     | AssignExp (VarExp a, exp) -> (
         match VarMap.find_opt a var_map.vars with
         | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
-        | Some (offset, t) ->
+        | Some (offset, t, _) ->
             let t = generate_expression ctx var_map exp in
             gen_command (Mov (Reg AX, Disp (offset, BP))) t;
             t )
@@ -387,7 +394,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         (* TODO Remove ruplicate code with the other ArrayIndexExp code. *)
         let t = generate_expression ctx var_map exp1 in
         let offset, _, var_map =
-          allocate_stack ctx var_map (CG.get_data_size (PointerType IntType))
+          allocate_stack ctx var_map (CG.get_data_size pvoid)
         in
         gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
         output "# array assign addr above\n";
@@ -400,11 +407,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
               gen_command
                 (Lea (Index (0, CX, AX, CG.get_data_size element_type), Reg AX))
-                (PointerType VoidType);
+                pvoid;
               (* Reuse the temp_loc here, since it's already popped. *)
-              gen_command
-                (Mov (Reg AX, Disp (offset, BP)))
-                (PointerType VoidType);
+              gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
               let t_value = generate_expression ctx var_map exp_r in
               (* get the address to assign to *)
               gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
@@ -432,7 +437,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     match st with
     | StatementItem (ReturnStatement exp) ->
         generate_expression ctx var_map exp |> ignore;
-        gen_command (Jmp(var_map.function_return_label)) IntType;
+        gen_command (Jmp var_map.function_return_label) IntType;
         var_map
     | StatementItem (ExpressionStatement (Some exp)) ->
         generate_expression ctx var_map exp |> ignore;
@@ -580,16 +585,18 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
            let start_offset = var_map.index - get_data_size data_type in *)
         gen_command (Mov (Reg AX, Disp (start_offset, BP))) data_type;
         match VarMap.find_opt a var_map.cur_scope_vars with
-        | Some (_, _) ->
+        | Some (_, _, _) ->
             raise
               (CodeGenError
                  ("Var " ^ a ^ " is already defined in current scope!"))
         | None ->
             {
               var_map with
-              vars = VarMap.add a (start_offset, data_type) var_map.vars;
+              vars = VarMap.add a (start_offset, data_type, None) var_map.vars;
               cur_scope_vars =
-                VarMap.add a (start_offset, data_type) var_map.cur_scope_vars;
+                VarMap.add a
+                  (start_offset, data_type, None)
+                  var_map.cur_scope_vars;
               index = start_offset;
             } )
 
@@ -608,7 +615,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             {
               var_map with
               (* TODO We assumed args are always int. *)
-              vars = VarMap.add a (index, IntType) var_map.vars;
+              vars = VarMap.add a (index, IntType, None) var_map.vars;
               break_label = "";
               continue_label = "";
             }
@@ -633,12 +640,13 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               {
                 var_map with
                 (* TODO We assumed args are always int. *)
-                vars = VarMap.add a (offset, IntType) var_map.vars;
+                vars = VarMap.add a (offset, IntType, None) var_map.vars;
                 break_label = "";
                 continue_label = "";
               }
               ar br
-        | _, _ -> raise (CodeGenError "Unexpectd case in generate_f_var_map_64_bit.")
+        | _, _ ->
+            raise (CodeGenError "Unexpectd case in generate_f_var_map_64_bit.")
       in
       gen_fun ctx var_map params CG.fun_arg_registers_64
     in

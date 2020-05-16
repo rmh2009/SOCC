@@ -158,6 +158,8 @@ run_test "pointer_test1_expect_3.cc" 3
 run_test "pointer_test2_expect_10.cc" 10
 run_test "pointer_test3_address_of_array_element_expect3.cc" 3
 run_test "pointer_test_address_of_address_increasing_expect_4.cc" 4
+
+run_test "char_operations_and_print_test.cc" 0 "abcdefghij"
 }
 
 if [ $MODE_ALL_TEST = 1 ]; then

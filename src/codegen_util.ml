@@ -66,6 +66,8 @@ module MakeCodeGen (System : System_t) = struct
 
   let is_32_bit = not is_64_bit
 
+  let fun_arg_registers_64 = [ "%rdi"; "%rsi"; "%rdx"; "%rcx"; "%r8"; "r9" ]
+
   let rec get_data_size (t : data_type_t) : int =
     match t with
     | IntType -> 4
@@ -73,12 +75,20 @@ module MakeCodeGen (System : System_t) = struct
     | PointerType _ -> if is_64_bit then 8 else 4
     | _ -> TokenError "Unsupported data type." |> raise
 
+  (* This is the footprint when evaluated after expression, i.e. saved in register. *)
+  let rec get_exp_data_size (t : data_type_t) : int =
+    match t with
+    | IntType -> 4
+    | ArrayType (t2, size) -> if is_64_bit then 8 else 4
+    | PointerType _ -> if is_64_bit then 8 else 4
+    | _ -> TokenError "Unsupported data type." |> raise
+
   let gen_register (r : register_t) (dtype : data_type_t) =
-    let dsize = get_data_size dtype in
+    let dsize = get_exp_data_size dtype in
     match r with
     | BP -> if is_64_bit then "%rbp" else "%ebp"
     | SP -> if is_64_bit then "%rsp" else "%esp"
-    | AX -> if dsize = 8 then "%rap" else "%eax"
+    | AX -> if dsize = 8 then "%rax" else "%eax"
     | BX -> if dsize = 8 then "%rbx" else "%ebx"
     | CX -> if dsize = 8 then "%rcx" else "%ecx"
     | DX -> if dsize = 8 then "%rdx" else "%edx"
@@ -94,7 +104,7 @@ module MakeCodeGen (System : System_t) = struct
           (gen_register index dtype) step
 
   let gen_byte_suffix dtype =
-    let dsize = get_data_size dtype in
+    let dsize = get_exp_data_size dtype in
     if dsize = 8 then "q"
     else if dsize = 4 then "l"
     else if dsize = 2 then "w"

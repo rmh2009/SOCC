@@ -84,7 +84,8 @@ let rec generate_f_call ctx var_map fname exps =
         (* Remove the padding *)
         remove_function_call_padding ctx
     | a :: r ->
-        generate_expression ctx var_map a |> ignore;
+        let t = generate_expression ctx var_map a in
+        if t != IntType then raise (CodeGenError("Fun param has to be int."));
         ctx.output "push   %eax\n";
         helper var_map fname r num_args
   in
@@ -105,7 +106,8 @@ and generate_f_call_64 ctx var_map fname exps =
         (* Remove the padding *)
         remove_function_call_padding ctx
     | a :: r -> (
-        generate_expression ctx var_map a |> ignore;
+        let t = generate_expression ctx var_map a in
+        if t != IntType then raise (CodeGenError("Fun param has to be int."));
         match registers with
         | hd :: tl ->
             ctx.output ("movq    %rax, " ^ hd ^ "\n");
@@ -115,7 +117,7 @@ and generate_f_call_64 ctx var_map fname exps =
             helper var_map fname r [] num_args )
   in
   helper var_map fname exps
-    [ "%rdi"; "%rsi"; "%rdx"; "%rcx"; "%r8"; "r9" ]
+    CG.fun_arg_registers_64
     (List.length exps)
 
 (* Generates the assembly code for a specific expression. *)
@@ -405,6 +407,7 @@ let update_break_continue_label (var_map : var_map_t) (break : string)
 let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
     (st : block_item_t) : var_map_t =
   let output = ctx.output in
+  let gen_command a b = CG.gen_command a b |> output in
   let get_unique_label = ctx.get_unique_label in
   match st with
   | StatementItem (ReturnStatement exp) ->
@@ -418,18 +421,20 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
   | StatementItem (ConditionalStatement (exp, st1, Some st2)) ->
       let cond_label = get_unique_label "_cond" in
       let cond_end_label = get_unique_label "_condend" in
-      generate_expression ctx var_map exp |> ignore;
-      output ("cmpl    $0, %eax\nje    " ^ cond_label ^ "\n");
+      let t = generate_expression ctx var_map exp in
+      gen_command (Comp(Imm(0), Reg(AX))) t;
+      gen_command (Je(cond_label)) IntType;
       let var_map = generate_block_item ctx var_map (StatementItem st1) in
-      output ("jmp    " ^ cond_end_label ^ "\n");
+      gen_command (Jmp(cond_end_label)) IntType;
       output (cond_label ^ ":\n");
       generate_block_item ctx var_map (StatementItem st2) |> ignore;
       output (cond_end_label ^ ":\n");
       var_map
   | StatementItem (ConditionalStatement (exp, st1, None)) ->
       let cond_end_label = get_unique_label "_condend" in
-      generate_expression ctx var_map exp |> ignore;
-      output ("cmpl    $0, %eax\nje    " ^ cond_end_label ^ "\n");
+      let t = generate_expression ctx var_map exp in
+      gen_command (Comp(Imm(0), Reg(AX))) t;
+      gen_command (Je(cond_end_label)) IntType;
       let var_map = generate_block_item ctx var_map (StatementItem st1) in
       output (cond_end_label ^ ":\n");
       var_map
@@ -444,8 +449,9 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
           generate_expression ctx var_map exp |> ignore;
           () );
       output (cond_label ^ ":\n");
-      generate_expression ctx var_map exp2 |> ignore;
-      output ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
+      let t = generate_expression ctx var_map exp2 in
+      gen_command (Comp(Imm(0), Reg(AX))) t;
+      gen_command (Je(end_label)) IntType;
       generate_block_item ctx
         (update_break_continue_label var_map break_label continue_label)
         (StatementItem st)
@@ -456,7 +462,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       | Some exp ->
           generate_expression ctx var_map exp |> ignore;
           () );
-      output ("jmp    " ^ cond_label ^ "\n");
+      gen_command (Jmp(cond_label)) IntType;
       output (end_label ^ ":\n");
       var_map
   | StatementItem (ForDeclStatement (declare, exp2, exp3_opt, st)) ->
@@ -475,8 +481,9 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
           (DeclareItem declare)
       in
       output (cond_label ^ ":\n");
-      generate_expression ctx condition_var_map exp2 |> ignore;
-      output ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
+      let t = generate_expression ctx condition_var_map exp2 in
+      gen_command (Comp(Imm(0), Reg(AX))) t;
+      gen_command (Je(end_label)) IntType;
       generate_block_item ctx
         (update_break_continue_label condition_var_map break_label
            continue_label)
@@ -486,18 +493,18 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       ( match exp3_opt with
       | None -> ()
       | Some exp -> generate_expression ctx condition_var_map exp |> ignore );
-      output ("jmp    " ^ cond_label ^ "\n");
+      gen_command (Jmp(cond_label)) IntType;
       output (end_label ^ ":\n");
       var_map
   | StatementItem BreakStatement ->
       if var_map.break_label = "" then
         raise (CodeGenError "Illegal break, no context.");
-      output ("jmp    " ^ var_map.break_label ^ "\n");
+      gen_command (Jmp(var_map.break_label)) IntType;
       var_map
   | StatementItem ContinueStatement ->
       if var_map.continue_label = "" then
         raise (CodeGenError "Illegal jump, no context.");
-      output ("jmp    " ^ var_map.continue_label ^ "\n");
+      gen_command (Jmp(var_map.continue_label)) IntType;
       var_map
   | StatementItem (WhileStatement (exp, st)) ->
       let cond_label = get_unique_label "_whilecond" in
@@ -505,13 +512,14 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       let break_label = end_label in
       let continue_label = cond_label in
       output (cond_label ^ ":\n");
-      generate_expression ctx var_map exp |> ignore;
-      output ("cmpl    $0, %eax\nje    " ^ end_label ^ "\n");
+      let t = generate_expression ctx var_map exp in
+      gen_command (Comp(Imm(0), Reg(AX))) t;
+      gen_command (Je(end_label)) IntType;
       generate_block_item ctx
         (update_break_continue_label var_map break_label continue_label)
         (StatementItem st)
       |> ignore;
-      output ("jmp    " ^ cond_label ^ "\n");
+      gen_command (Jmp(cond_label)) IntType;
       output (end_label ^ ":\n");
       var_map
   | StatementItem (DoStatement (st, exp)) ->
@@ -525,8 +533,9 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
         (StatementItem st)
       |> ignore;
       output (continue_label ^ ":\n");
-      generate_expression ctx var_map exp |> ignore;
-      output ("cmpl    $0, %eax\njne    " ^ begin_label ^ "\n");
+      let t = generate_expression ctx var_map exp in
+      gen_command (Comp(Imm(0), Reg(AX))) t;
+      gen_command (Jne(begin_label)) IntType;
       output (end_label ^ ":\n");
       var_map
   | StatementItem (CompoundStatement items) ->
@@ -537,8 +546,9 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       |> ignore;
       var_map
   | DeclareItem (DeclareStatement (data_type, a, exp_opt)) -> (
+    (* TODO add type check here for data_type and the type returned by exp_opt *)
       ( match exp_opt with
-      | None -> output "movl    $0, %eax\n"
+      | None -> gen_command (Mov(Imm(0), Reg(AX))) IntType; (* zero out register *)
       | Some exp -> generate_expression ctx var_map exp |> ignore );
       (* allocate the data block on stack. *)
       let start_offset, _, var_map =
@@ -547,7 +557,7 @@ let rec generate_block_item (ctx : context_t) (var_map : var_map_t)
       (* output ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
          (* Start from the lower address. *)
          let start_offset = var_map.index - get_data_size data_type in *)
-      output ("movl    %eax, " ^ string_of_int start_offset ^ "(%ebp)\n");
+      gen_command (Mov(Reg(AX), Disp(start_offset, BP))) data_type;
       match VarMap.find_opt a var_map.cur_scope_vars with
       | Some (_, _) ->
           raise
@@ -568,11 +578,12 @@ and generate_block_statements (ctx : context_t) (var_map : var_map_t)
 
 let generate_function (ctx : context_t) (f : function_t) : var_map_t =
   (* Generates the var_map with the references to the function arguments. *)
-  let rec generate_f_var_map var_map fname params index =
+  let rec generate_f_var_map ctx var_map fname params index =
     match params with
     | [] -> var_map
     | a :: r ->
         generate_f_var_map
+          ctx
           {
             var_map with
             (* TODO We assumed args are always int. *)
@@ -581,6 +592,32 @@ let generate_function (ctx : context_t) (f : function_t) : var_map_t =
             continue_label = "";
           }
           fname r (index + 4)
+  in
+
+  let rec generate_f_var_map_64_bit ctx var_map fname params index =
+    (* for 64 bit, we always copy function arguments from registers to stack. *)
+    if List.length params > 0 then 
+      CG.gen_command (Add(Imm(-(List.length params) * 8), Reg(SP))) (PointerType(VoidType)) |> ctx.output;
+    if List.length params > 6 then
+      raise (CodeGenError("Only support at most 6 function params now in 64 bit mode."));
+    let rec gen_fun ctx var_map params index regs =
+      match params, regs with
+    | [], _ -> var_map
+    | a :: ar , b :: br ->
+        ctx.output (Printf.sprintf "    movq    %s, $(%d)%s # moving fun param\n" b index "%rbp");
+        gen_fun
+          ctx
+          {
+            var_map with
+            (* TODO We assumed args are always int. *)
+            vars = VarMap.add a (index, IntType) var_map.vars;
+            break_label = "";
+            continue_label = "";
+          }
+          ar (index - 8) br
+    | _, _ -> raise(CodeGenError("Unexpectd case in generate_f_call_64."))
+    in
+    gen_fun ctx var_map params (-8) CG.fun_arg_registers_64
   in
 
   let var_map =
@@ -600,9 +637,13 @@ let generate_function (ctx : context_t) (f : function_t) : var_map_t =
       | None -> var_map
       | Some items ->
           let output = ctx.output in
+          let gen_command a b = CG.gen_command a b |> output in
           output ("_" ^ fname ^ ":\n");
           (* Saving the previous stack start point and use esp as the new stack start. *)
-          output "push    %ebp\nmovl    %esp, %ebp\n";
+          if not CG.is_64_bit then
+            output "    push    %ebp\n    movl    %esp, %ebp\n"
+          else 
+            output "    push    %rbp\n    movl    %rsp, %rbp\n";
           (* Reset the index at the function beginning. *)
           ctx.set_min_index 0;
           (* This is a little hacky, we need to generate the output then get the stack size,
@@ -610,21 +651,26 @@ let generate_function (ctx : context_t) (f : function_t) : var_map_t =
            * for each function. *)
           let fun_buf = Buffer.create 32 in
           let return_label = ctx.get_unique_label "_fun_return" in
-          let ctx =
+          let var_map = 
+            if CG.is_64_bit then
+              generate_f_var_map_64_bit ctx var_map fname params 8
+          else
+            generate_f_var_map ctx var_map fname params 8 in
+          let ctx_new =
             { ctx with output = (fun a -> Buffer.add_string fun_buf a) }
           in
-          let var_map = generate_f_var_map var_map fname params 8 in
           (* The block statements will be in the temporary buffer fun_buf. *)
           let var_map = { var_map with function_return_label = return_label } in
-          let res = generate_block_statements ctx var_map items in
-          output
-            ("addl    $" ^ string_of_int (ctx.get_min_index ()) ^ ", %esp\n");
+          let res = generate_block_statements ctx_new var_map items in
+          gen_command (Add(Imm(ctx_new.get_min_index ()), Reg(SP))) (PointerType(VoidType));
           output (Buffer.contents fun_buf);
           (* Return logic *)
           output (return_label ^ ":\n");
-          output
-            ("addl    $" ^ string_of_int (-ctx.get_min_index ()) ^ ", %esp\n");
-          output "movl    %ebp, %esp\npop    %ebp\n";
+          gen_command (Add(Imm(-ctx_new.get_min_index ()), Reg(SP))) (PointerType(VoidType));
+          if not CG.is_64_bit then
+            output "    movl    %ebp, %esp\n    pop    %ebp\n"
+          else
+            output "    movl    %rbp, %rsp\n    pop    %rbp\n";
           output "ret\n";
           res )
 

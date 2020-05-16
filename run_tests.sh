@@ -11,14 +11,32 @@ MODE_RUN_OCAML_FILE=0
 MODE_ONE_TEST=0
 MODE_ALL_TEST=0
 
-if [ $MODE == "ocaml_file" ]; then
+if [ $MODE == "ocaml_test" ]; then
   MODE_RUN_OCAML_FILE=1
 elif [ $MODE == "one_test" ]; then
   MODE_ONE_TEST=1
 elif [ $MODE == "all_test" ]; then
   MODE_ALL_TEST=1
 else
-  echo "Unrecognized mode: >$MODE<, must be either 'ocaml_file', 'one_test', or 'all_test'"
+  echo "Unrecognized mode: >$MODE<, must be either 'ocaml_test', 'one_test', or 'all_test'"
+  echo ""
+  echo "Usage:"
+  echo ""
+  echo "  // Run all tests in 64 or 32 bit"
+  echo "  run_tests.sh all_test <64|32>"
+  echo "  e.g."
+  echo "    ./run_tests.sh all_test 64"
+  echo ""
+  echo "  // Run one test, test_file_name must be in test/ folder."
+  echo "  run_tests.sh one_test <test_file_name> <expected_result> <64|32>"
+  echo "  e.g."
+  echo "    ./run_tests.sh one_test for_loop3_expect_10.cc 10 64"
+  echo ""
+  echo "  // Compile and run the ocaml file, such as test.ml"
+  echo "  run_tests.sh ocaml_test <ocaml_file_name>"
+  echo "  e.g."
+  echo "    ./run_tests.sh ocaml_test test.ml"
+  echo ""
   exit 1
 fi
 
@@ -143,7 +161,10 @@ run_test "pointer_test_address_of_address_increasing_expect_4.cc" 4
 }
 
 if [ $MODE_ALL_TEST = 1 ]; then
-  echo "Running all unit tests."
+  if [ $2 = "64" ]; then
+    IS64BIT=1
+  fi
+  echo "######## Running all unit tests, is_64_bit=$IS64BIT"
   cd src
 
   run_all_tests
@@ -157,8 +178,12 @@ if [ $MODE_ALL_TEST = 1 ]; then
 fi
 
 if [ $MODE_ONE_TEST = 1 ]; then
+  if [ $4 = "64" ]; then
+    IS64BIT=1
+  fi
+  echo "######## Running one test: $2 expecting $3, is_64_bit=$IS64BIT"
   cd src
-  echo "Running one test: $2 expecting $3"
+  echo ""
   run_test $2 $3
   exit 0
 fi

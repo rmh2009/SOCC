@@ -102,13 +102,14 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | DX -> if dsize = 8 then "%rdx" else "%edx"
 
   let gen_operand (dtype : data_type_t) (op : operand_t) =
+    let pvoid = PointerType(VoidType) in
     match op with
     | Imm a -> "$" ^ string_of_int a
     | Reg r -> gen_register r dtype
-    | RegV r -> "(" ^ gen_register r dtype ^ ")"
-    | Disp (offset, r) -> Printf.sprintf "%d(%s)" offset (gen_register r dtype)
+    | RegV r -> "(" ^ gen_register r pvoid ^ ")" (* This is taking the value of an address, so it has to be pointer type. *)
+    | Disp (offset, r) -> Printf.sprintf "%d(%s)" offset (gen_register r pvoid)
     | Index (offset, base, index, step) ->
-        Printf.sprintf "%d(%s, %s, %d)" offset (gen_register base dtype)
+        Printf.sprintf "%d(%s, %s, %d)" offset (gen_register base pvoid)
           (gen_register index dtype) step
 
   let gen_byte_suffix dtype =

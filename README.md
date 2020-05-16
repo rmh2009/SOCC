@@ -21,9 +21,7 @@ Implemented features:
  - Support for array type. (see note1)
  - A simple type checking system. (see note1)
  - Support for pointer. (see note2)
-
-Limitations:
- - For now it only compiles to 32 bit x86 assembly code.
+ - Supports both 32 bit and 64 bit x86 assembly (see note4).
 
 Features missing:
  - Support for struct.
@@ -182,10 +180,27 @@ p = &m[0];
 
 Both AddressOfOp and DereferenceOp should be parsed on the highest priority, i.e. on the 'factor' level, same as the logical negation operation. The code for taking the address of an array element is actually the same for the ArrayIndexOperation, except we always return the address directly.
 
+# Note 3
+(TBD) Changing the stack allocation to bulk allocation.
+# Note 4
+
+(TBD) We now have support for 64 bit assembly! Refactored a lot of code in the codegen library, details coming.
+
 # Compiling the assembly
 
-You can use gcc to compile the assembly output into machine code. This has only been tested on MacOS. Unfortunately the lasted XCode on MacOS has dropped support for generating 32bit programs, for a temporary solution you can use a virtual box with a 32bit os, or downgrade XCode to a previous version that still had support for 32bit, I used XCode 9.4. The corresponding CommandlineTools need to be installed as well.
+You can use gcc to compile the assembly output into machine code. This has only been tested on MacOS.
+
+For compiling to 64 bit assembly, use the main64.ml file.
+
+For compiling to 32 bit assembly, use the main.ml file. For MacOS the lasted XCode on MacOS has dropped support for generating 32bit programs, for a temporary solution you can use a virtual box with a 32bit os, or downgrade XCode to a previous version that still had support for 32bit, I used XCode 9.4. The corresponding CommandlineTools need to be installed as well.
 
 # Test
 
 Run the run_tests.sh script to compile a set of test files and compare with expected results.
+```
+# Run all tests in 64 bit mode.
+./run_tests.h all_test 64
+
+# Run all tests in 32 bit mode.
+./run_tests.h all_test 32
+```

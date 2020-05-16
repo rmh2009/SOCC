@@ -48,39 +48,49 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
   (* Hacky solution per Nora's article to add padding so that function stack is 16
    * byte aligned. This is for MacOs only. *)
   let add_function_call_padding (ctx : context_t) (num_args : int) : unit =
+    ctx.output "#---------- function call align begin -----\n";
     if CG.is_32_bit then (
-      ctx.output "movl    %esp, %eax\n";
+      ctx.output (Printf.sprintf "#---------- %d args on stack -----\n" num_args);
+      ctx.output "    movl    %esp, %eax\n";
       (* TODO assumed that function param is always int *)
-      ctx.output ("subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
-      ctx.output "xorl %edx, %edx\nmovl $0x20, %ecx\nidivl %ecx\n";
-      ctx.output "subl %edx, %esp\npushl %edx\n" )
+      ctx.output ("    subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
+      ctx.output "    xorl %edx, %edx\n    movl $0x20, %ecx\n    idivl %ecx\n";
+      ctx.output "    subl %edx, %esp\n    pushl %edx\n" )
     else (
       (* 64 bit *)
-      ctx.output "movq   %rsp, %rax\n";
+      ctx.output "    movq   %rsp, %rax\n";
       (* TODO assumed that function param is always 8 bytes *)
       let args_on_stack = if num_args > 6 then num_args - 6 else 0 in
+      ctx.output (Printf.sprintf "#---------- %d args on stack -----\n" args_on_stack);
       ctx.output
-        ("subq $" ^ string_of_int (8 * (args_on_stack + 1)) ^ ", %rax\n");
-      ctx.output "xorq %rdx, %rdx\nmovq $0x20, %rcx\nidivq %rcx\n";
-      ctx.output "subq %rdx, %rsp\npushq %rdx\n" )
+        ("    subq $" ^ string_of_int (8 * (args_on_stack + 1)) ^ ", %rax\n");
+      ctx.output "    xorq %rdx, %rdx\n    movq $0x20, %rcx\n    idivq %rcx\n";
+      ctx.output "    subq %rdx, %rsp\n    pushq %rdx\n" );
+    ctx.output "#---------- function call align end -----\n"
 
-  let remove_function_call_padding (ctx : context_t) : unit =
-    if CG.is_32_bit then ctx.output "popl %edx\naddl %edx, %esp\n"
-    else ctx.output "popq %rdx\naddq %rdx, %rsp\n"
+  let remove_function_call_padding (ctx : context_t) num_args : unit =
+    ctx.output "#---------- remove function call align -----\n";
+    if CG.is_32_bit then (
+      ctx.output ("    addl    $" ^ string_of_int (4 * num_args) ^ ", %esp\n");
+      ctx.output "    popl %edx\n    addl %edx, %esp\n" )
+    else (
+      if num_args > 6 then (raise (CodeGenError("Does not support more than 6 params in 64 bit mode yet.")));
+      ctx.output "    popq %rdx\n    addq %rdx, %rsp\n")
 
   (* Generate code for calling a function. This includes adding padding for
    * alignment, pushing parameters, remove padding afterwards, etc.*)
   let rec generate_f_call ctx var_map fname exps =
+
+    if List.length exps > 6 then (raise (CodeGenError("Does not support more than 6 params in 64 bit mode yet.")));
     add_function_call_padding ctx (List.length exps);
     let rec helper var_map fname exps num_args =
       match exps with
       | [] ->
-          ctx.output ("call    _" ^ fname ^ "\n");
+          ctx.output ("    call    _" ^ fname ^ "\n");
           (* Function returned, remove arguments from stack. *)
           (* TODO assumed that function param is always int *)
-          ctx.output ("addl    $" ^ string_of_int (4 * num_args) ^ ", %esp\n");
           (* Remove the padding *)
-          remove_function_call_padding ctx
+          remove_function_call_padding ctx num_args
       | a :: r ->
           let t = generate_expression ctx var_map a in
           if t != IntType then raise (CodeGenError "Fun param has to be int.");
@@ -102,16 +112,16 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
           (* Function returned, remove arguments from stack. *)
           (* TODO assumed that function param is always int *)
           (* Remove the padding *)
-          remove_function_call_padding ctx
+          remove_function_call_padding ctx num_args
       | a :: r -> (
           let t = generate_expression ctx var_map a in
           if t != IntType then raise (CodeGenError "Fun param has to be int.");
           match registers with
           | hd :: tl ->
-              ctx.output ("movq    %rax, " ^ hd ^ "\n");
+              ctx.output ("    movq    %rax, " ^ hd ^ "\n");
               helper var_map fname r tl num_args
           | [] ->
-              ctx.output "pushq    %rax\n";
+              ctx.output "    pushq    %rax\n";
               helper var_map fname r [] num_args )
     in
     helper var_map fname exps CG.fun_arg_registers_64 (List.length exps)
@@ -390,9 +400,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
               gen_command
                 (Lea (Index (0, CX, AX, CG.get_data_size element_type), Reg AX))
-                element_type;
+                (PointerType VoidType);
               (* Reuse the temp_loc here, since it's already popped. *)
-              gen_command (Mov (Reg AX, Disp (offset, BP))) element_type;
+              gen_command
+                (Mov (Reg AX, Disp (offset, BP)))
+                (PointerType VoidType);
               let t_value = generate_expression ctx var_map exp_r in
               (* get the address to assign to *)
               gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
@@ -420,7 +432,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     match st with
     | StatementItem (ReturnStatement exp) ->
         generate_expression ctx var_map exp |> ignore;
-        output ("jmp  " ^ var_map.function_return_label ^ "    # return \n");
+        gen_command (Jmp(var_map.function_return_label)) IntType;
         var_map
     | StatementItem (ExpressionStatement (Some exp)) ->
         generate_expression ctx var_map exp |> ignore;
@@ -605,36 +617,31 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
 
     let rec generate_f_var_map_64_bit ctx var_map fname params index =
       (* for 64 bit, we always copy function arguments from registers to stack. *)
-      if List.length params > 0 then
-        CG.gen_command
-          (Add (Imm (-List.length params * 8), Reg SP))
-          (PointerType VoidType)
-        |> ctx.output;
       if List.length params > 6 then
         raise
           (CodeGenError
              "Only support at most 6 function params now in 64 bit mode.");
-      let rec gen_fun ctx var_map params index regs =
+      let rec gen_fun ctx var_map params regs =
         match (params, regs) with
         | [], _ -> var_map
         | a :: ar, b :: br ->
+            let offset, _, var_map = allocate_stack ctx var_map 8 in
             ctx.output
               (Printf.sprintf "    movq    %s, %d(%s) # moving fun param\n" b
-                 index "%rbp");
+                 offset "%rbp");
             gen_fun ctx
               {
                 var_map with
                 (* TODO We assumed args are always int. *)
-                vars = VarMap.add a (index, IntType) var_map.vars;
+                vars = VarMap.add a (offset, IntType) var_map.vars;
                 break_label = "";
                 continue_label = "";
               }
-              ar (index - 8) br
-        | _, _ -> raise (CodeGenError "Unexpectd case in generate_f_call_64.")
+              ar br
+        | _, _ -> raise (CodeGenError "Unexpectd case in generate_f_var_map_64_bit.")
       in
-      gen_fun ctx var_map params (-8) CG.fun_arg_registers_64
+      gen_fun ctx var_map params CG.fun_arg_registers_64
     in
-
     let var_map =
       {
         vars = VarMap.empty;
@@ -646,18 +653,21 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         function_return_label = "";
       }
     in
+    let output = ctx.output in
+    let gen_command a b = CG.gen_command a b |> output in
+
     match f with
     | IntFunction (fname, params, items_opt) -> (
         match items_opt with
         | None -> var_map
         | Some items ->
-            let output = ctx.output in
-            let gen_command a b = CG.gen_command a b |> output in
             output ("_" ^ fname ^ ":\n");
-            (* Saving the previous stack start point and use esp as the new stack start. *)
+
+            (* Function prologue *)
             if not CG.is_64_bit then
               output "    push    %ebp\n    movl    %esp, %ebp\n"
             else output "    push    %rbp\n    movq    %rsp, %rbp\n";
+
             (* Reset the index at the function beginning. *)
             ctx.set_min_index 0;
             (* This is a little hacky, we need to generate the output then get the stack size,
@@ -665,32 +675,41 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
              * for each function. *)
             let fun_buf = Buffer.create 32 in
             let return_label = ctx.get_unique_label "_fun_return" in
-            let var_map =
-              if CG.is_64_bit then
-                generate_f_var_map_64_bit ctx var_map fname params 8
-              else generate_f_var_map ctx var_map fname params 8
-            in
             let ctx_new =
               { ctx with output = (fun a -> Buffer.add_string fun_buf a) }
             in
-            (* The block statements will be in the temporary buffer fun_buf. *)
+            let var_map =
+              if CG.is_64_bit then
+                generate_f_var_map_64_bit ctx_new var_map fname params 8
+              else generate_f_var_map ctx_new var_map fname params 8
+            in
             let var_map =
               { var_map with function_return_label = return_label }
             in
+            (* The block statements will be in the temporary buffer fun_buf. *)
             let res = generate_block_statements ctx_new var_map items in
+
+            (* Stack allocation and function body *)
+            output "#---------- stack allocation ----------\n";
             gen_command
               (Add (Imm (ctx_new.get_min_index ()), Reg SP))
               (PointerType VoidType);
+            output "#---------- function body    ----------\n";
             output (Buffer.contents fun_buf);
-            (* Return logic *)
+            (* Return label, for early returns. *)
             output (return_label ^ ":\n");
+
+            output "#---------- stack deallocation --------\n";
             gen_command
               (Add (Imm (-ctx_new.get_min_index ()), Reg SP))
               (PointerType VoidType);
+
+            (* Function epilog *)
             if not CG.is_64_bit then
               output "    movl    %ebp, %esp\n    pop    %ebp\n"
             else output "    movq    %rbp, %rsp\n    pop    %rbp\n";
-            output "ret\n";
+            output "    ret\n";
+
             res )
 
   (* Generates the assembly code as a string given the ast in Parser.program_t type. *)

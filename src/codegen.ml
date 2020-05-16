@@ -22,7 +22,6 @@ type var_map_t = {
 type context_t = {
   output : string -> unit;
   get_unique_label : string -> string;
-  is_32_bit : bool;
   (* Used to store the maximum (minimum since it's negative) index. We will
    * use this to allocate stack at once at the beginning of a function.
    * Temporary variables may also be allocated here so that we don't have to
@@ -49,7 +48,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
   (* Hacky solution per Nora's article to add padding so that function stack is 16
    * byte aligned. This is for MacOs only. *)
   let add_function_call_padding (ctx : context_t) (num_args : int) : unit =
-    if ctx.is_32_bit then (
+    if CG.is_32_bit then (
       ctx.output "movl    %esp, %eax\n";
       (* TODO assumed that function param is always int *)
       ctx.output ("subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
@@ -57,17 +56,17 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       ctx.output "subl %edx, %esp\npushl %edx\n" )
     else (
       (* 64 bit *)
-      ctx.output "movl    %rsp, %rax\n";
+      ctx.output "movq   %rsp, %rax\n";
       (* TODO assumed that function param is always 8 bytes *)
       let args_on_stack = if num_args > 6 then num_args - 6 else 0 in
       ctx.output
         ("subq $" ^ string_of_int (8 * (args_on_stack + 1)) ^ ", %rax\n");
-      ctx.output "xorq %rdx, %rdx\nmovq $0x20, %rcx\nidivl %rcx\n";
+      ctx.output "xorq %rdx, %rdx\nmovq $0x20, %rcx\nidivq %rcx\n";
       ctx.output "subq %rdx, %rsp\npushq %rdx\n" )
 
   let remove_function_call_padding (ctx : context_t) : unit =
-    if ctx.is_32_bit then ctx.output "popl %edx\naddl %edx, %esp\n"
-    else ctx.output "popq %rdx\naddl %rdx, %rsp\n"
+    if CG.is_32_bit then ctx.output "popl %edx\naddl %edx, %esp\n"
+    else ctx.output "popq %rdx\naddq %rdx, %rsp\n"
 
   (* Generate code for calling a function. This includes adding padding for
    * alignment, pushing parameters, remove padding afterwards, etc.*)
@@ -217,7 +216,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Imm n, Reg AX)) IntType;
         IntType
     | FunctionCallExp (fname, exps) ->
-        generate_f_call ctx var_map fname exps;
+        if CG.is_32_bit then generate_f_call ctx var_map fname exps
+        else generate_f_call_64 ctx var_map fname exps;
         (* TODO assume function always return int. *)
         IntType
     | NegateOp exp ->
@@ -619,7 +619,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         | [], _ -> var_map
         | a :: ar, b :: br ->
             ctx.output
-              (Printf.sprintf "    movq    %s, $(%d)%s # moving fun param\n" b
+              (Printf.sprintf "    movq    %s, %d(%s) # moving fun param\n" b
                  index "%rbp");
             gen_fun ctx
               {
@@ -657,7 +657,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             (* Saving the previous stack start point and use esp as the new stack start. *)
             if not CG.is_64_bit then
               output "    push    %ebp\n    movl    %esp, %ebp\n"
-            else output "    push    %rbp\n    movl    %rsp, %rbp\n";
+            else output "    push    %rbp\n    movq    %rsp, %rbp\n";
             (* Reset the index at the function beginning. *)
             ctx.set_min_index 0;
             (* This is a little hacky, we need to generate the output then get the stack size,
@@ -689,7 +689,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               (PointerType VoidType);
             if not CG.is_64_bit then
               output "    movl    %ebp, %esp\n    pop    %ebp\n"
-            else output "    movl    %rbp, %rsp\n    pop    %rbp\n";
+            else output "    movq    %rbp, %rsp\n    pop    %rbp\n";
             output "ret\n";
             res )
 
@@ -703,7 +703,6 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       {
         output = Buffer.add_string buf;
         get_unique_label = get_unique_label count;
-        is_32_bit = true;
         set_min_index = (fun a -> min_index := a);
         get_min_index = (fun () -> !min_index);
       }

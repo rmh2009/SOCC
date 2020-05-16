@@ -2,7 +2,7 @@
 
 # Tweakable onfigurations.
 
-IS64BIT=1
+IS64BIT=0
 
 # Do not change below this line.
 
@@ -47,7 +47,12 @@ compile_code() {
 run_code() {
   # Compile the generated assembly into executable and run.
   # Use the brew installed gcc since the default gcc in macos no longer supports 32bit.
-  gcc -v -arch i386 assembly.s -o out
+  if [ $IS64BIT = 1 ]; then
+    gcc -v assembly.s -o out
+  else 
+    gcc -v -arch i386 assembly.s -o out
+  fi
+
   if [ $? -ne 0 ]; then
     "Failed to compile assembly into machine code."
     exit 1
@@ -77,6 +82,7 @@ run_test()  {
   if [ $actual_result != $result ]; then
     echo "*********** ( Failed testing $cc_file, expecting $result, actual $actual_result ) "
     failed_tests="$failed_tests ( Failed testing $cc_file, expecting $result, actual $actual_result ) "
+    return 1
   fi
   if [ -z $expected_output ]; then
     echo "skipping expected_output since it's unset."

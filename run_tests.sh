@@ -1,8 +1,33 @@
 #!/bin/bash
 
+# Tweakable onfigurations.
+
+IS64BIT=1
+
+# Do not change below this line.
+
+MODE=$1
+MODE_RUN_OCAML_FILE=0
+MODE_ONE_TEST=0
+MODE_ALL_TEST=0
+
+if [ $MODE == "ocaml_file" ]; then
+  MODE_RUN_OCAML_FILE=1
+elif [ $MODE == "one_test" ]; then
+  MODE_ONE_TEST=1
+elif [ $MODE == "all_test" ]; then
+  MODE_ALL_TEST=1
+else
+  echo "Unrecognized mode: >$MODE<, must be either 'ocaml_file', 'one_test', or 'all_test'"
+  exit 1
+fi
+
+OCAML_DEPS="../src/lexer.ml ../src/type.ml ../src/typeutil.ml ../src/parser.ml ../src/util.ml ../src/codegen_util.ml ../src/codegen.ml "
+
 # Compile the compiler, then use it to compile the test.cc file into assembly.s.
 compile_code() {
   cc_file=$1
+  ocaml_main_file=$2
   echo "Testing file $cc_file..."
   echo $PWD
   cp ../test/$cc_file ./test.cc
@@ -10,7 +35,7 @@ compile_code() {
     echo "Failed to copy file test/$cc_file"
     exit 1
   fi
-  ocamlopt -o cc_ocaml ../src/lexer.ml ../src/type.ml ../src/typeutil.ml ../src/parser.ml ../src/util.ml ../src/codegen_util.ml ../src/codegen.ml ../src/main.ml
+    ocamlopt -o cc_ocaml $OCAML_DEPS ../src/"$ocaml_main_file"
   ret=$?
   if [[ $ret -ne 0 ]]; then
     echo "Compiling failed."
@@ -36,7 +61,12 @@ run_test()  {
   cc_file=$1
   result=$2
   expected_output=$3
-  compile_code $cc_file
+  if [ $IS64BIT = 1 ]; then
+    compile_code $cc_file "main64.ml"
+  else
+    compile_code $cc_file "main.ml"
+  fi
+
   if [ $? != 0 ]; then
     echo "Compiling failed!"
     exit 1
@@ -106,15 +136,31 @@ run_test "pointer_test3_address_of_array_element_expect3.cc" 3
 run_test "pointer_test_address_of_address_increasing_expect_4.cc" 4
 }
 
-echo "Running all unit tests."
-cd src
+if [ $MODE_ALL_TEST = 1 ]; then
+  echo "Running all unit tests."
+  cd src
 
-run_all_tests
+  run_all_tests
 
-if [ -z $failed_tests ]; then
-  echo "All tests passed!"
-else
-  echo "Failed tests: $failed_tests"
+  if [ -z $failed_tests ]; then
+    echo "All tests passed!"
+  else
+    echo "Failed tests: $failed_tests"
+  fi
+  exit 0
 fi
 
+if [ $MODE_ONE_TEST = 1 ]; then
+  cd src
+  echo "Running one test: $2 expecting $3"
+  run_test $2 $3
+  exit 0
+fi
 
+if [ $MODE_RUN_OCAML_FILE = 1 ]; then
+  cd src
+  TEST_FILE=$2
+  ocamlopt -o ../tmp/cc_ocaml $OCAML_DEPS ../src/"$2"
+  ../tmp/cc_ocaml
+  exit 0
+fi

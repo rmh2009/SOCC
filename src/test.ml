@@ -3,7 +3,7 @@ open Parser
 open Codegen
 open Codegen_util
 
-module CG = MakeCodeGen(System32Bit)
+module CG = MakeCodeGenUtil(System32Bit)
 
 let _ =
   CG.gen_command (Mov(Reg(BP), Reg(SP))) (PointerType(UnknownType)) |> print_endline;

@@ -3,7 +3,7 @@ open Parser
 open Codegen
 open Codegen_util
 
-module CGS = MakeCodeGen(MakeCodeGenUtil (System32Bit))
+module CGS = MakeCodeGen(MakeCodeGenUtil (System64Bit))
 
 let _ =
   let ast = get_ast (parse_tokens (read_file_content "test.cc")) in

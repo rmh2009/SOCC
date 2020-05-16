@@ -61,7 +61,15 @@ module System64Bit : System_t = struct
   let fail = fail_genutil
 end
 
-module MakeCodeGen (System : System_t) = struct
+module type CodeGenUtil_t = sig
+  val is_64_bit : bool
+  val is_32_bit : bool
+  val fun_arg_registers_64 : string list
+  val get_data_size : data_type_t -> int
+  val gen_command : command_t -> data_type_t -> string
+end
+
+module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
   let is_64_bit = System.is_64_bit
 
   let is_32_bit = not is_64_bit

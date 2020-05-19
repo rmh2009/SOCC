@@ -19,7 +19,20 @@ type var_map_t = {
   break_label : string;
   continue_label : string;
   function_return_label : string;
+  static_data : (string * static_data_t) list; (* label and data list *)
 }
+
+let default_var_map = 
+      {
+        vars = VarMap.empty;
+        cur_scope_vars = VarMap.empty;
+        (* Start the offset as 0, since %ebp = %esp. *)
+        index = 0;
+        break_label = "";
+        continue_label = "";
+        function_return_label = "";
+        static_data = [];
+      }
 
 type context_t = {
   output : string -> unit;
@@ -40,13 +53,16 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
    *  allocated at once. It also takes care of alignments.' *)
   let allocate_stack (ctx : context_t) (vars : var_map_t) (bytes : int) :
       int * string * var_map_t =
-    let r = -vars.index mod bytes in
+    let align = if bytes < 8 then bytes else 8 in
+    let r = -vars.index mod align in
     let new_index =
-      if r = 0 then vars.index - bytes else vars.index - (2 * bytes) + r
+      if r = 0 then vars.index - bytes else vars.index - align + r - bytes
     in
     if ctx.get_min_index () > new_index then ctx.set_min_index new_index else ();
     (new_index, "", { vars with index = new_index })
 
+  (* TODO This can now be removed since we always make a function stack 16 byte aligned.
+   * We might still need to do only a one-time alignment in the main function. *)
   (* Hacky solution per Nora's article to add padding so that function stack is 16
    * byte aligned. This is for MacOs only. *)
   let add_function_call_padding (ctx : context_t) (num_args : int) : unit =
@@ -102,7 +118,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       | a :: r ->
           let t = generate_expression ctx var_map a in
           if t != IntType then raise (CodeGenError "Fun param has to be int.");
-          ctx.output "push   %eax\n";
+          ctx.output "    push   %eax\n";
           helper var_map fname r num_args
     in
     helper var_map fname exps (List.length exps)
@@ -267,8 +283,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Reg AX, Disp (off, BP))) t1;
         let t2 = generate_expression ctx var_map exp2 in
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
-        let larger_t = if CG.get_data_size t1 > CG.get_data_size t2 then
-          t1 else t2 in
+        let larger_t =
+          if CG.get_data_size t1 > CG.get_data_size t2 then t1 else t2
+        in
         gen_command (Add (Reg CX, Reg AX)) larger_t;
         t1
     | MinusExp (exp1, exp2) ->
@@ -279,8 +296,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Reg AX, Disp (off, BP))) t2;
         let t1 = generate_expression ctx var_map exp1 in
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
-        let larger_t = if CG.get_data_size t1 > CG.get_data_size t2 then
-          t1 else t2 in
+        let larger_t =
+          if CG.get_data_size t1 > CG.get_data_size t2 then t1 else t2
+        in
         gen_command (Sub (Reg CX, Reg AX)) larger_t;
         t1
     | MultiExp (exp1, exp2) ->
@@ -572,18 +590,37 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         var_map
     | DeclareItem (DeclareStatement (data_type, a, exp_opt)) -> (
         (* TODO add type check here for data_type and the type returned by exp_opt *)
-        ( match exp_opt with
-        | None -> gen_command (Mov (Imm 0, Reg AX)) IntType
-        (* zero out register *)
-        | Some exp -> generate_expression ctx var_map exp |> ignore );
+        (* data_opt represents any static data that may have been defined in exp *)
+        let data_opt =
+          match exp_opt with
+          | None ->
+              gen_command (Mov (Imm 0, Reg AX)) IntType |> ignore;
+              None
+          | Some (ConstantStringExp str) ->
+              Some (ctx.get_unique_label "_data", DataString str)
+          | Some exp ->
+              generate_expression ctx var_map exp |> ignore;
+              None
+        in
+
         (* allocate the data block on stack. *)
         let start_offset, _, var_map =
           allocate_stack ctx var_map (CG.get_data_size data_type)
         in
-        (* output ("subl   $" ^ string_of_int (get_data_size data_type) ^ ", %esp\n");
-           (* Start from the lower address. *)
-           let start_offset = var_map.index - get_data_size data_type in *)
-        gen_command (Mov (Reg AX, Disp (start_offset, BP))) data_type;
+
+        ( match (data_type, data_opt) with
+        (* String initialization. *)
+        | ArrayType (_, _), Some (label, DataString str) ->
+            (* Use memcpy to copy the static string to targe. *)
+            output
+              (Printf.sprintf "# --------- memcpy %s %s to array variable: %s -------\n" label
+                 str a);
+            gen_command (Lea(Disp(start_offset, BP), Reg(AX))) (PointerType(VoidType));
+            CG.call_memcpy AX label (String.length str) |> output
+        | _, _ ->
+            gen_command (Mov (Reg AX, Disp (start_offset, BP))) data_type
+            |> ignore );
+
         match VarMap.find_opt a var_map.cur_scope_vars with
         | Some (_, _, _) ->
             raise
@@ -598,6 +635,10 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
                   (start_offset, data_type, None)
                   var_map.cur_scope_vars;
               index = start_offset;
+              static_data =
+                ( match data_opt with
+                | None -> var_map.static_data
+                | Some data -> data :: var_map.static_data );
             } )
 
   (* Generates the assembly code for a list of block items. *)
@@ -659,6 +700,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         break_label = "";
         continue_label = "";
         function_return_label = "";
+        static_data = [];
       }
     in
     let output = ctx.output in
@@ -697,10 +739,18 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             (* The block statements will be in the temporary buffer fun_buf. *)
             let res = generate_block_statements ctx_new var_map items in
 
-            (* Stack allocation and function body *)
+            (* Stack allocation and function body, always make the stack 16 byte aligned. *)
             output "#---------- stack allocation ----------\n";
+
+
+            (* This is tricky here, we already have two registered pushed at the beginning of a function,
+             * one is the return address saved by call, the other is 'push ebp', so we need to
+             * take that into consideration. *)
+            let pvoid = PointerType(VoidType) in
+            let two_additional_push = 2 * CG.get_data_size(pvoid) in
+            let total_stack_size = two_additional_push + ctx_new.get_min_index () in
             gen_command
-              (Add (Imm (ctx_new.get_min_index ()), Reg SP))
+              (Add (Imm ((make_aligned_number total_stack_size  16) - two_additional_push), Reg SP))
               (PointerType VoidType);
             output "#---------- function body    ----------\n";
             output (Buffer.contents fun_buf);
@@ -737,6 +787,12 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     ctx.output ".globl _main\n";
     match ast with
     | Program fns ->
-        List.iter (fun f -> generate_function ctx f |> ignore) fns;
+        let accumulated_var_map =
+        List.fold_left (fun var_map f ->
+          let res_var_map = generate_function ctx f in
+          { res_var_map with static_data = (List.append var_map.static_data res_var_map.static_data)}
+        ) default_var_map fns in
+        ctx.output (CG.gen_data_section accumulated_var_map.static_data);
         Buffer.contents buf
+
 end

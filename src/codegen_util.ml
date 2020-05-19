@@ -77,9 +77,15 @@ module type CodeGenUtil_t = sig
   val get_data_size : data_type_t -> int
 
   val gen_command : command_t -> data_type_t -> string
+
+  val call_memcpy : register_t -> string -> int -> string
+
+  val gen_data_section : (string * static_data_t) list -> string
 end
 
 module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
+  let pvoid = PointerType VoidType
+
   let is_64_bit = System.is_64_bit
 
   let is_32_bit = not is_64_bit
@@ -176,4 +182,46 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
 
   let gen_command (command : command_t) dtype =
     gen_command_internal command dtype |> System.format_commands
+
+  (* Generate the call memcpy function logic. reg is where the target address is,
+   * label is the source labe, len is size. *)
+  let call_memcpy (reg : register_t) (label : string) (len : int) : string =
+    (* In 64 bit mode, we use Label(%rip) offset to get PIE (position independent executable) address
+     * of the label. There is no equivalence of this in 32 bit mode though. *)
+    if reg != AX then System.fail "Please use register ax here. ";
+    if is_64_bit then
+      ( "# ------- start memcpy ----------\n" ^ "    leaq    " ^ label
+      ^ "(%rip), %rsi\n" )
+      ^ ("    movl     $" ^ string_of_int len ^ ", %edx\n")
+      ^ ("    movq     " ^ gen_register reg pvoid ^ ", %rdi\n")
+      ^ "    call _memcpy\n" ^ "# ------- end memcpy ----------\n"
+    else
+      let temp_label = "_label_for" ^ label in
+      (* Trick to get PIE address of label. Need to make sure that temp label is only used once. *)
+      "# ------- start memcpy ----------\n"
+      ^ ("    call    " ^ temp_label ^ "\n")
+      ^ (temp_label ^ ": pop    %ecx\n")
+      ^ ("    leal   " ^ label ^ "-" ^ temp_label ^ "(%ecx), %ecx\n")
+      ^ "    subl    $4, %esp # padding \n"
+      ^ ("    pushl    $" ^ string_of_int len ^ "\n")
+      ^ "    pushl    %ecx\n" ^ "    pushl    %eax\n"
+      ^ "    call    _memcpy\n"
+      ^ "    addl     $16, %esp\n" ^ "# ------- end memcpy ----------\n"
+
+  let gen_data_section (datas : (string * static_data_t) list) : string =
+    let header = ".section    __TEXT,__const\n.p2align        4 \n" in
+    let body =
+      List.fold_left
+        (fun acc data ->
+          let temp =
+            match data with
+            | label, DataInt num ->
+                System.fail "int static data not implemented yet."
+            | label, DataString str ->
+                label ^ ":\n" ^ ".asciz  \"" ^ str ^ "\"\n"
+          in
+          acc ^ temp)
+        "" datas
+    in
+    header ^ body
 end

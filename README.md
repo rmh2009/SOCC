@@ -22,6 +22,7 @@ Implemented features:
  - A simple type checking system. (see note1)
  - Support for pointer. (see note2)
  - Supports both 32 bit and 64 bit x86 assembly (see note4).
+ - Support for char and char array initialization.
 
 Features missing:
  - Support for struct.
@@ -185,6 +186,44 @@ Both AddressOfOp and DereferenceOp should be parsed on the highest priority, i.e
 # Note 4
 
 (TBD) We now have support for 64 bit assembly! Refactored a lot of code in the codegen library, details coming.
+
+# Note 5
+
+Added support for char and array char initialization. Example:
+```
+char test[100] = "hello world!";
+```
+
+To implement this a const string needs to be added to the data section, and then call 'memcpy' to copy to the declared variable. This turned out to be very tricky as I encountered two problems:
+
+One is referencing a lable address. We can't just pass the label direclty as it turned out the absolute address is unknown due to PIE (Position Independent Executable).
+On 64 bit machine this can be easily solved using the %rip register, we can use it to calculate the actual address of a label, i.e. 'string_label(%rip)'. But on 32 bit machine, current instruction address is not provided (it's not in %eip ..sigh). After searching on web it turns out there is a trick we can use to
+get it:
+```
+f:
+    ...
+    call temporary_label
+temporary_label:
+    pop %eax                # now %eax holds the address of temporary_label.
+    leal string_label-temporary_label(%eax), %eax
+                            # now %eax holds the address of string_label.
+
+.section    __TEXT,__const
+string_label:
+    .asciz "hello world"
+```
+
+The other issue is alignment before calling a function. %esp/%rsp should be 16 byte aligned right before the call function. _memcpy is especially picky about this. In my previous implementation I make sure that space allocated for a function is 16 byte aligned, but I forgot the fact that a function has two additional pushes on the stack, e.g.
+
+```
+f:
+  # call f already pushed a return address to stack, so this is +1
+  pushl    %ebp
+  movl     %esp, %ebp # another push, so +2
+```
+
+memcpy accepts 3 parameters, so we need to push another 4 byte to align the stack.
+
 
 # Compiling the assembly
 

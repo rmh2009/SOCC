@@ -27,7 +27,7 @@ type command_t =
   | Mul of operand_t * operand_t
   | Div of operand_t
   | Lea of operand_t * operand_t
-  | Xor of operand_t
+  | Xor of operand_t * operand_t
   | Neg of operand_t
   | Not of operand_t
 
@@ -176,7 +176,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | Mul (a, b) -> gen_two "imul" a b
     | Div a -> gen_one "idiv" a
     | Lea (a, b) -> gen_two "lea" a b
-    | Xor a -> gen_one "xor" a
+    | Xor (a,b) -> gen_two "xor" a b
     | Neg a -> gen_one "neg" a
     | Not a -> gen_one "not" a
 

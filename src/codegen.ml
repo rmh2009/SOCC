@@ -179,6 +179,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
                 gen_command (Lea (Disp (offset, BP), Reg AX)) pvoid
             | PointerType _ ->
                 gen_command (Mov (Disp (offset, BP), Reg AX)) pvoid
+            | CharType ->
+                gen_command (Xor (Reg(AX), Reg(AX))) pvoid;
+                gen_command (Mov (Disp (offset, BP), Reg AX)) CharType
             | x ->
                 CodeGenError ("Unsupported type in VarExp." ^ print_data_type x)
                 |> raise );
@@ -197,11 +200,13 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             generate_expression ctx var_map exp2 |> ignore;
             gen_command (Mov (Disp (off, BP), Reg CX)) pvoid;
             gen_command
-              (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg AX))
+              (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg DX))
               pvoid;
-            if not (is_type_array child_type) then
-              gen_command (Mov (RegV AX, Reg AX)) child_type
-            else output " # index array end (addr, already in eax)\n";
+            if not (is_type_array child_type) then (
+              gen_command (Xor (Reg AX, Reg AX)) pvoid;
+              gen_command (Mov (RegV DX, Reg AX)) child_type)
+            else
+              gen_command (Mov (Reg DX, Reg AX)) pvoid;
             child_type
         | _ ->
             raise
@@ -250,6 +255,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Imm n, Reg AX)) IntType;
         IntType
     | ConstantCharExp a ->
+        gen_command (Xor (Reg(AX), Reg(AX))) pvoid;
         gen_command (Mov (Imm (int_of_char a), Reg AX)) CharType;
         CharType
     | ConstantStringExp a -> raise (CodeGenError "String unimplemented")

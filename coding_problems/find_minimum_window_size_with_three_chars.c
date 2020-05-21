@@ -26,5 +26,6 @@ int main() {
       j = j+1;
     }
   }
+  // Expect 4.
   return minlen;
 }

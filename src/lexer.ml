@@ -167,7 +167,14 @@ let parse_tokens (content : string) : token_t list =
     else parse_string_literal (acc ^ String.make 1 content.[i]) content (i + 1)
   in
 
-  let rec parse_one_token content i =
+  let rec consume_after_new_line content i =
+    if i >= String.length content then (EndOfFile, i)
+    else
+      match content.[i] with
+      | '\n' -> parse_one_token content (i + 1)
+      | a -> consume_after_new_line content (i + 1)
+
+  and parse_one_token content i =
     if i >= String.length content then (EndOfFile, i)
     else
       match content.[i] with
@@ -186,11 +193,12 @@ let parse_tokens (content : string) : token_t list =
       | '~' -> (BitComplement, i + 1)
       | '+' -> (Addition, i + 1)
       | '*' -> (Multiplication, i + 1)
-      | '/' -> (Division, i + 1)
+      | '/' -> 
+          if content.[i+1] = '/' then consume_after_new_line content (i+1)
+          else (Division, i + 1)
       | ':' -> (Colon, i + 1)
       | '?' -> (QuestionMark, i + 1)
-      | '&' ->
-          if content.[i + 1] = '&' then (And, i + 2) else (Address, i + 1)
+      | '&' -> if content.[i + 1] = '&' then (And, i + 2) else (Address, i + 1)
       | '|' ->
           if content.[i + 1] = '|' then (Or, i + 2)
           else raise (LexerError "Expeting another | sign.")

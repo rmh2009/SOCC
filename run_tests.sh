@@ -30,7 +30,7 @@ else
   echo "  // Run one test, test_file_name must be in test/ folder."
   echo "  run_tests.sh one_test <test_file_name> <expected_result> <64|32>"
   echo "  e.g."
-  echo "    ./run_tests.sh one_test for_loop3_expect_10.cc 10 64"
+  echo "    ./run_tests.sh one_test for_loop3_expect_10.c 10 64"
   echo ""
   echo "  // Compile and run the ocaml file, such as test.ml"
   echo "  run_tests.sh ocaml_test <ocaml_file_name>"
@@ -42,7 +42,7 @@ fi
 
 OCAML_DEPS="../src/lexer.ml ../src/type.ml ../src/typeutil.ml ../src/parser.ml ../src/util.ml ../src/codegen_util.ml ../src/codegen.ml "
 
-# Compile the compiler, then use it to compile the test.cc file into assembly.s.
+# Compile the compiler, then use it to compile the test.c file into assembly.s.
 compile_code() {
   cc_file=$1
   ocaml_main_file=$2
@@ -114,62 +114,62 @@ run_test()  {
 }
 
 run_all_tests() {
-run_test "test/binary_operators_expect_0.cc"  0
-run_test "test/binary_operators_expect_1.cc"  1 
-run_test "test/binary_operators_expect_9.cc"  9 
-run_test "test/division_test_expect_3.cc"  3 
-run_test "test/multiply_test_expect_15.cc"  15 
+run_test "test/binary_operators_expect_0.c"  0
+run_test "test/binary_operators_expect_1.c"  1 
+run_test "test/binary_operators_expect_9.c"  9 
+run_test "test/division_test_expect_3.c"  3 
+run_test "test/multiply_test_expect_15.c"  15 
 
-run_test "test/test_inc_expect2.cc" 2
-run_test "test/test_inc2_expect1.cc" 1
-run_test "test/test_dec_expect1.cc" 1
-run_test "test/test_dec2_expect2.cc" 2
+run_test "test/test_inc_expect2.c" 2
+run_test "test/test_inc2_expect1.c" 1
+run_test "test/test_dec_expect1.c" 1
+run_test "test/test_dec2_expect2.c" 2
 
-run_test "test/compound_statement2_expect_1.cc"  1 
-run_test "test/compound_statement3_expect_3.cc"  3
-run_test "test/compound_statement4_expect_3.cc" 3
-run_test "test/compound_statement5_expect_2.cc" 2
-run_test "test/compound_statement_expect_4.cc" 4
-run_test "test/conditional_expression_expect_3.cc" 3
-run_test "test/conditional_statement2_expect_2.cc" 2
-run_test "test/conditional_statement_expect_2.cc" 2
-run_test "test/local_variable_expect_24.cc" 24
-run_test "test/unary_operator_expect_0.cc" 0
-run_test "test/for_loop_expect_10.cc" 10
-run_test "test/for_loop2_expect_10.cc" 10
-run_test "test/for_loop3_expect_10.cc" 10
-run_test "test/do_loop_expect_10.cc" 10
-run_test "test/while_loop_expect_10.cc" 10
-run_test "test/break_in_for_loop2_expect_15.cc" 15
-run_test "test/break_in_for_loop_expect_15.cc" 15
-run_test "test/break_inner_compound_expect_5.cc" 5
-run_test "test/continue_in_do_loop2_expect_15.cc" 15
-run_test "test/continue_in_do_loop_expect_15.cc" 15
-run_test "test/continue_in_for_loop2_expect_15.cc" 15
-run_test "test/continue_in_for_loop_expect_15.cc" 15
-run_test "test/continue_inner_loop_expect_15.cc" 15
+run_test "test/compound_statement2_expect_1.c"  1 
+run_test "test/compound_statement3_expect_3.c"  3
+run_test "test/compound_statement4_expect_3.c" 3
+run_test "test/compound_statement5_expect_2.c" 2
+run_test "test/compound_statement_expect_4.c" 4
+run_test "test/conditional_expression_expect_3.c" 3
+run_test "test/conditional_statement2_expect_2.c" 2
+run_test "test/conditional_statement_expect_2.c" 2
+run_test "test/local_variable_expect_24.c" 24
+run_test "test/unary_operator_expect_0.c" 0
+run_test "test/for_loop_expect_10.c" 10
+run_test "test/for_loop2_expect_10.c" 10
+run_test "test/for_loop3_expect_10.c" 10
+run_test "test/do_loop_expect_10.c" 10
+run_test "test/while_loop_expect_10.c" 10
+run_test "test/break_in_for_loop2_expect_15.c" 15
+run_test "test/break_in_for_loop_expect_15.c" 15
+run_test "test/break_inner_compound_expect_5.c" 5
+run_test "test/continue_in_do_loop2_expect_15.c" 15
+run_test "test/continue_in_do_loop_expect_15.c" 15
+run_test "test/continue_in_for_loop2_expect_15.c" 15
+run_test "test/continue_in_for_loop_expect_15.c" 15
+run_test "test/continue_inner_loop_expect_15.c" 15
 
-run_test "test/for_nested_for_loops_expect_60.cc" 60
-run_test "test/function_call_test1_expect_19.cc" 19
-run_test "test/function_call_test2_expect_21.cc" 21
-run_test "test/function_call_pointer_expect_6.cc" 6
-run_test "test/function_call_test_fibonacci_expect_5.cc" 5
-run_test "test/print_hello_world.cc" 0 "Hello, World!"
+run_test "test/for_nested_for_loops_expect_60.c" 60
+run_test "test/function_call_test1_expect_19.c" 19
+run_test "test/function_call_test2_expect_21.c" 21
+run_test "test/function_call_pointer_expect_6.c" 6
+run_test "test/function_call_test_fibonaci_expect_5.c" 5
+run_test "test/print_hello_world.c" 0 "Hello, World!"
 
-run_test "test/array_test1_expect_4.cc" 4
-run_test "test/array_2d_test_expect_4.cc" 4
-run_test "test/array_2d_test_expect2_18.cc" 18
+run_test "test/array_test1_expect_4.c" 4
+run_test "test/array_2d_test_expect_4.c" 4
+run_test "test/array_2d_test_expect2_18.c" 18
 
-run_test "test/pointer_test1_expect_3.cc" 3
-run_test "test/pointer_test2_expect_10.cc" 10
-run_test "test/pointer_test3_address_of_array_element_expect3.cc" 3
-run_test "test/pointer_test_address_of_address_increasing_expect_4.cc" 4
+run_test "test/pointer_test1_expect_3.c" 3
+run_test "test/pointer_test2_expect_10.c" 10
+run_test "test/pointer_test3_address_of_array_element_expect3.c" 3
+run_test "test/pointer_test_address_of_address_increasing_expect_4.c" 4
 
-run_test "test/char_operations_and_print_test.cc" 0 "abcdefghij"
-run_test "test/char_array_initialization.cc" 0 "helloworld!"
+run_test "test/char_operations_and_print_test.c" 0 "abcdefghij"
+run_test "test/char_array_initialization.c" 0 "helloworld!"
 
 # Complex problems.
-run_test "coding_problems/8_queens.c" 92
+run_test "coding_problems/8_queen.c" 92
 }
 
 if [ $MODE_ALL_TEST = 1 ]; then

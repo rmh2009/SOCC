@@ -17,6 +17,10 @@ type expression_t =
   | ConstantCharExp of char
   | ConstantStringExp of string
   | ConstantFloatExp of float
+  | PreIncExp of expression_t
+  | PreDecExp of expression_t
+  | PostIncExp of expression_t
+  | PostDecExp of expression_t
   | VarExp of string
   | ArrayIndexExp of expression_t * expression_t (* first expression_t must be of type array, second is index *)
   | DereferenceExp of expression_t

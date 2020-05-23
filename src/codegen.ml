@@ -182,25 +182,85 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
                 CodeGenError ("Unsupported type in VarExp." ^ print_data_type x)
                 |> raise );
             t )
+    | PreIncExp exp -> (
+        match exp with
+        | VarExp a -> (
+            match VarMap.find_opt a var_map.vars with
+            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | Some (offset, t, _) ->
+                gen_command (Inc (Disp (offset, BP))) t;
+                gen_command (Mov (Disp (offset, BP), Reg AX)) t;
+                t )
+        | ArrayIndexExp (exp1, exp2) ->
+            raise (CodeGenError "PreInc of ArrayIndex not implemented yet.")
+        | _ ->
+            raise
+              (CodeGenError "PreIncExp expecting VarExp or ArrayIndexExp only.")
+        )
+    | PostIncExp exp -> (
+        match exp with
+        | VarExp a -> (
+            match VarMap.find_opt a var_map.vars with
+            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | Some (offset, t, _) ->
+                gen_command (Mov (Disp (offset, BP), Reg AX)) t;
+                gen_command (Inc (Disp (offset, BP))) t;
+                t )
+        | ArrayIndexExp (exp1, exp2) ->
+            raise (CodeGenError "PostInc of ArrayIndex not implemented yet.")
+        | _ ->
+            raise
+              (CodeGenError "PostIncExp expecting VarExp or ArrayIndexExp only.")
+        )
+    | PreDecExp exp -> (
+        match exp with
+        | VarExp a -> (
+            match VarMap.find_opt a var_map.vars with
+            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | Some (offset, t, _) ->
+                gen_command (Dec (Disp (offset, BP))) t;
+                gen_command (Mov (Disp (offset, BP), Reg AX)) t;
+                t )
+        | ArrayIndexExp (exp1, exp2) ->
+            raise (CodeGenError "PreDec of ArrayIndex not implemented yet.")
+        | _ ->
+            raise
+              (CodeGenError "PreDecExp expecting VarExp or ArrayIndexExp only.")
+        )
+    | PostDecExp exp -> (
+        match exp with
+        | VarExp a -> (
+            match VarMap.find_opt a var_map.vars with
+            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | Some (offset, t, _) ->
+                gen_command (Mov (Disp (offset, BP), Reg AX)) t;
+                gen_command (Dec (Disp (offset, BP))) t;
+                t )
+        | ArrayIndexExp (exp1, exp2) ->
+            raise (CodeGenError "PostDec of ArrayIndex not implemented yet.")
+        | _ ->
+            raise
+              (CodeGenError "PostDecExp expecting VarExp or ArrayIndexExp only.")
+        )
     | ArrayIndexExp (exp1, exp2) -> (
         (* exp1 must be of type Array, in the current implementation types are evaluated
          * during code generation, the evaluation result and step size also depends on
          * the type of exp1, so we need to evaluate exp1 first.*)
         let t = generate_expression ctx var_map exp1 in
         match t with
-        | ArrayType (child_type, _) | PointerType(ArrayType(child_type, _))->
+        | ArrayType (child_type, _) | PointerType (ArrayType (child_type, _)) ->
             let off, _, var_map =
               allocate_stack ctx var_map (CG.get_data_size pvoid)
             in
             gen_command (Mov (Reg AX, Disp (off, BP))) pvoid;
             generate_expression ctx var_map exp2 |> ignore;
             gen_command (Mov (Disp (off, BP), Reg CX)) pvoid;
-            gen_command (Mul (Imm(CG.get_data_size child_type), Reg(AX))) pvoid;
-            gen_command (Add (Reg(CX), Reg(AX))) pvoid;
-            gen_command (Mov (Reg(AX), Reg(DX))) pvoid;
+            gen_command (Mul (Imm (CG.get_data_size child_type), Reg AX)) pvoid;
+            gen_command (Add (Reg CX, Reg AX)) pvoid;
+            gen_command (Mov (Reg AX, Reg DX)) pvoid;
             (* gen_command
-              (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg DX))
-              pvoid; *)
+               (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg DX))
+               pvoid; *)
             if not (is_type_array child_type) then (
               gen_command (Xor (Reg AX, Reg AX)) pvoid;
               gen_command (Mov (RegV DX, Reg AX)) child_type )
@@ -240,11 +300,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             gen_command (Mov (Reg AX, Disp (off, BP))) pvoid;
             generate_expression ctx var_map exp2 |> ignore;
             gen_command (Mov (Disp (off, BP), Reg CX)) pvoid;
-            gen_command (Mul (Imm(CG.get_data_size child_type), Reg(AX))) pvoid;
-            gen_command (Add (Reg(CX), Reg(AX))) pvoid;
+            gen_command (Mul (Imm (CG.get_data_size child_type), Reg AX)) pvoid;
+            gen_command (Add (Reg CX, Reg AX)) pvoid;
             (* gen_command
-              (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg AX))
-              pvoid; *)
+               (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg AX))
+               pvoid; *)
             PointerType child_type
         | _ -> raise (CodeGenError "Expecting an array type in ArrayIndexExp.")
         )
@@ -429,11 +489,13 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             else
               let t_index = generate_expression ctx var_map exp2 in
               gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
-              gen_command (Mul (Imm(CG.get_data_size element_type), Reg(AX))) pvoid;
-              gen_command (Add (Reg(CX), Reg(AX))) pvoid;
+              gen_command
+                (Mul (Imm (CG.get_data_size element_type), Reg AX))
+                pvoid;
+              gen_command (Add (Reg CX, Reg AX)) pvoid;
               (* gen_command
-                (Lea (Index (0, CX, AX, CG.get_data_size element_type), Reg AX))
-                pvoid; *)
+                 (Lea (Index (0, CX, AX, CG.get_data_size element_type), Reg AX))
+                 pvoid; *)
               (* Reuse the temp_loc here, since it's already popped. *)
               gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
               let t_value = generate_expression ctx var_map exp_r in
@@ -463,8 +525,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             else ()
         | a ->
             raise
-              (CodeGenError ("Type can not be dereferenced! " ^ print_data_type a))
-        );
+              (CodeGenError
+                 ("Type can not be dereferenced! " ^ print_data_type a)) );
         gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
         gen_command (Mov (Reg AX, RegV CX)) t2;
         t2
@@ -714,7 +776,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             gen_fun ctx
               {
                 var_map with
-                vars = VarMap.add name (offset, decay(dtype), None) var_map.vars;
+                vars = VarMap.add name (offset, decay dtype, None) var_map.vars;
                 break_label = "";
                 continue_label = "";
               }

@@ -30,6 +30,8 @@ type command_t =
   | Xor of operand_t * operand_t
   | Neg of operand_t
   | Not of operand_t
+  | Inc of operand_t
+  | Dec of operand_t
 
 exception CodeGenUtilError of string
 
@@ -179,6 +181,8 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | Xor (a,b) -> gen_two "xor" a b
     | Neg a -> gen_one "neg" a
     | Not a -> gen_one "not" a
+    | Inc a -> gen_one "inc" a
+    | Dec a -> gen_one "dec" a
 
   let gen_command (command : command_t) dtype =
     gen_command_internal command dtype |> System.format_commands

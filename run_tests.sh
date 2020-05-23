@@ -120,6 +120,11 @@ run_test "test/binary_operators_expect_9.cc"  9
 run_test "test/division_test_expect_3.cc"  3 
 run_test "test/multiply_test_expect_15.cc"  15 
 
+run_test "test/test_inc_expect2.cc" 2
+run_test "test/test_inc2_expect1.cc" 1
+run_test "test/test_dec_expect1.cc" 1
+run_test "test/test_dec2_expect2.cc" 2
+
 run_test "test/compound_statement2_expect_1.cc"  1 
 run_test "test/compound_statement3_expect_3.cc"  3
 run_test "test/compound_statement4_expect_3.cc" 3

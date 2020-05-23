@@ -33,15 +33,13 @@ let rec print_expression spaces exp =
     ^ print_expression (spaces + 1) exp1
     ^ print_expression (spaces + 1) exp2
   in
+  let print_space str = String.make spaces ' ' ^ str in
+  let print_exp e = print_expression (spaces + 1) e in
   match exp with
   | VarExp a -> String.make spaces ' ' ^ "Ref of " ^ a ^ "\n"
   | ArrayIndexExp (arr, index) ->
-      String.make spaces ' ' ^ "ArrayIndex:\n"
-      ^ print_expression (spaces + 1) arr
-      ^ print_expression (spaces + 1) index
-  | DereferenceExp exp ->
-      String.make spaces ' ' ^ "PointerDereference:\n"
-      ^ print_expression (spaces + 1) exp
+      print_space "ArrayIndex:\n" ^ print_exp arr ^ print_exp index
+  | DereferenceExp exp -> print_space "PointerDereference:\n" ^ print_exp exp
   | AddressOfExp exp ->
       String.make spaces ' ' ^ "AddressOf:\n"
       ^ print_expression (spaces + 1) exp
@@ -53,6 +51,14 @@ let rec print_expression spaces exp =
       String.make spaces ' ' ^ "FloatExpression: " ^ string_of_float n ^ "\n"
   | ConstantStringExp n ->
       String.make spaces ' ' ^ "StringExpression: " ^ n ^ "\n"
+  | PreIncExp exp ->
+      String.make spaces ' ' ^ "PreInc : " ^ print_expression (spaces + 1) exp
+  | PostIncExp exp ->
+      String.make spaces ' ' ^ "PostInc : " ^ print_expression (spaces + 1) exp
+  | PreDecExp exp ->
+      String.make spaces ' ' ^ "PreDec : " ^ print_expression (spaces + 1) exp
+  | PostDecExp exp ->
+      String.make spaces ' ' ^ "PostDec : " ^ print_expression (spaces + 1) exp
   | NegateOp exp ->
       String.make spaces ' ' ^ "NegateOp:\n" ^ print_expression (spaces + 1) exp
   | LogicalNegateOp exp ->
@@ -207,7 +213,6 @@ let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
    * assuming we already proccessed LeftBracket. *)
   let rec parse_array_index_exp exp tokens =
     let index, r = parse_expression tokens in
-    Printf.printf "Parsed array index. \n";
     let r = consume_token RightBracket r in
     if peek r = LeftBracket then
       let r = consume_token LeftBracket r in
@@ -229,6 +234,8 @@ let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
           let params, r3 = parse_call_params [] r2 in
           (FunctionCallExp (a, params), r3)
       | LeftBracket :: r2 -> parse_array_index_exp (VarExp a) r2
+      | Addition :: Addition :: r2 -> (PostIncExp (VarExp a), r2)
+      | Negation :: Negation :: r2 -> (PostDecExp (VarExp a), r2)
       | r2 -> (VarExp a, r2) )
   | Multiplication :: r ->
       let factor, r = parse_factor r in
@@ -236,6 +243,12 @@ let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
   | Address :: r ->
       let factor, r = parse_factor r in
       (AddressOfExp factor, r)
+  | Addition :: Addition :: r ->
+      let factor, r = parse_factor r in
+      (PreIncExp factor, r)
+  | Negation :: Negation:: r ->
+      let factor, r = parse_factor r in
+      (PreDecExp factor, r)
   | Negation :: r ->
       let exp, left = parse_factor r in
       (NegateOp exp, left)
@@ -393,7 +406,6 @@ let parse_expression_opt (tokens : token_t list) :
 
 (* Does not consume the trailing Semicolon (if there is one). *)
 let rec parse_statement (tokens : token_t list) : statement_t * token_t list =
-  print_endline "parsing statement.";
   let parse_expression_opt_or_declare tokens =
     if peek tokens = Semicolon then (None, None, tokens)
     else if peek tokens = IntKeyword then
@@ -406,9 +418,7 @@ let rec parse_statement (tokens : token_t list) : statement_t * token_t list =
   match tokens with
   | [] -> fail "Empty statement."
   | ReturnKeyword :: r ->
-      print_endline ("next token: " ^ print_token (peek r));
       let expression, left = parse_expression r in
-      print_endline ("got expression: " ^ print_expression 0 expression);
       (ReturnStatement expression, left)
   | LeftBrace :: r ->
       let block_items, left = parse_block_items [] r in
@@ -467,7 +477,6 @@ and parse_declare (tokens : token_t list) : declare_t * token_t list =
 (* Parses tokens to get a statement, returns the statement and the remaining tokens. *)
 (* This function consumes the trailing ; if it exists. *)
 and parse_block_item (tokens : token_t list) : block_item_t * token_t list =
-  print_endline "parsing block item.";
   let result, r =
     match tokens with
     | [] -> fail "Empty statement or declare statement."

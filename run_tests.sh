@@ -2,7 +2,7 @@
 
 # Tweakable onfigurations.
 
-IS64BIT=0
+IS64BIT=1
 
 # Do not change below this line.
 
@@ -48,7 +48,7 @@ compile_code() {
   ocaml_main_file=$2
   echo "Testing file $cc_file..."
   echo $PWD
-  cp ../test/$cc_file ./test.cc
+  cp ../$cc_file ./test.cc
   if [ $? != 0 ]; then
     echo "Failed to copy file test/$cc_file"
     exit 1
@@ -114,59 +114,66 @@ run_test()  {
 }
 
 run_all_tests() {
-run_test "binary_operators_expect_0.cc"  0
-run_test "binary_operators_expect_1.cc"  1 
-run_test "binary_operators_expect_9.cc"  9 
-run_test "division_test_expect_3.cc"  3 
-run_test "multiply_test_expect_15.cc"  15 
+run_test "test/binary_operators_expect_0.cc"  0
+run_test "test/binary_operators_expect_1.cc"  1 
+run_test "test/binary_operators_expect_9.cc"  9 
+run_test "test/division_test_expect_3.cc"  3 
+run_test "test/multiply_test_expect_15.cc"  15 
 
-run_test "compound_statement2_expect_1.cc"  1 
-run_test "compound_statement3_expect_3.cc"  3
-run_test "compound_statement4_expect_3.cc" 3
-run_test "compound_statement5_expect_2.cc" 2
-run_test "compound_statement_expect_4.cc" 4
-run_test "conditional_expression_expect_3.cc" 3
-run_test "conditional_statement2_expect_2.cc" 2
-run_test "conditional_statement_expect_2.cc" 2
-run_test "local_variable_expect_24.cc" 24
-run_test "unary_operator_expect_0.cc" 0
-run_test "for_loop_expect_10.cc" 10
-run_test "for_loop2_expect_10.cc" 10
-run_test "for_loop3_expect_10.cc" 10
-run_test "do_loop_expect_10.cc" 10
-run_test "while_loop_expect_10.cc" 10
-run_test "break_in_for_loop2_expect_15.cc" 15
-run_test "break_in_for_loop_expect_15.cc" 15
-run_test "break_inner_compound_expect_5.cc" 5
-run_test "continue_in_do_loop2_expect_15.cc" 15
-run_test "continue_in_do_loop_expect_15.cc" 15
-run_test "continue_in_for_loop2_expect_15.cc" 15
-run_test "continue_in_for_loop_expect_15.cc" 15
-run_test "continue_inner_loop_expect_15.cc" 15
+run_test "test/compound_statement2_expect_1.cc"  1 
+run_test "test/compound_statement3_expect_3.cc"  3
+run_test "test/compound_statement4_expect_3.cc" 3
+run_test "test/compound_statement5_expect_2.cc" 2
+run_test "test/compound_statement_expect_4.cc" 4
+run_test "test/conditional_expression_expect_3.cc" 3
+run_test "test/conditional_statement2_expect_2.cc" 2
+run_test "test/conditional_statement_expect_2.cc" 2
+run_test "test/local_variable_expect_24.cc" 24
+run_test "test/unary_operator_expect_0.cc" 0
+run_test "test/for_loop_expect_10.cc" 10
+run_test "test/for_loop2_expect_10.cc" 10
+run_test "test/for_loop3_expect_10.cc" 10
+run_test "test/do_loop_expect_10.cc" 10
+run_test "test/while_loop_expect_10.cc" 10
+run_test "test/break_in_for_loop2_expect_15.cc" 15
+run_test "test/break_in_for_loop_expect_15.cc" 15
+run_test "test/break_inner_compound_expect_5.cc" 5
+run_test "test/continue_in_do_loop2_expect_15.cc" 15
+run_test "test/continue_in_do_loop_expect_15.cc" 15
+run_test "test/continue_in_for_loop2_expect_15.cc" 15
+run_test "test/continue_in_for_loop_expect_15.cc" 15
+run_test "test/continue_inner_loop_expect_15.cc" 15
 
-run_test "for_nested_for_loops_expect_60.cc" 60
-run_test "function_call_test1_expect_19.cc" 19
-run_test "function_call_test2_expect_21.cc" 21
-run_test "function_call_test_fibonacci_expect_5.cc" 5
-run_test "print_hello_world.cc" 0 "Hello, World!"
+run_test "test/for_nested_for_loops_expect_60.cc" 60
+run_test "test/function_call_test1_expect_19.cc" 19
+run_test "test/function_call_test2_expect_21.cc" 21
+run_test "test/function_call_pointer_expect_6.cc" 6
+run_test "test/function_call_test_fibonacci_expect_5.cc" 5
+run_test "test/print_hello_world.cc" 0 "Hello, World!"
 
-run_test "array_test1_expect_4.cc" 4
-run_test "array_2d_test_expect_4.cc" 4
-run_test "array_2d_test_expect2_18.cc" 18
+run_test "test/array_test1_expect_4.cc" 4
+run_test "test/array_2d_test_expect_4.cc" 4
+run_test "test/array_2d_test_expect2_18.cc" 18
 
-run_test "pointer_test1_expect_3.cc" 3
-run_test "pointer_test2_expect_10.cc" 10
-run_test "pointer_test3_address_of_array_element_expect3.cc" 3
-run_test "pointer_test_address_of_address_increasing_expect_4.cc" 4
+run_test "test/pointer_test1_expect_3.cc" 3
+run_test "test/pointer_test2_expect_10.cc" 10
+run_test "test/pointer_test3_address_of_array_element_expect3.cc" 3
+run_test "test/pointer_test_address_of_address_increasing_expect_4.cc" 4
 
-run_test "char_operations_and_print_test.cc" 0 "abcdefghij"
-run_test "char_array_initialization.cc" 0 "helloworld!"
+run_test "test/char_operations_and_print_test.cc" 0 "abcdefghij"
+run_test "test/char_array_initialization.cc" 0 "helloworld!"
+
+# Complex problems.
+run_test "coding_problems/8_queens.c" 92
 }
 
 if [ $MODE_ALL_TEST = 1 ]; then
   if [ $2 = "64" ]; then
     IS64BIT=1
+  elif [ $2 = "32" ]; then
+    IS64BIT=0
   fi
+
   echo "######## Running all unit tests, is_64_bit=$IS64BIT"
   cd src
 
@@ -183,6 +190,8 @@ fi
 if [ $MODE_ONE_TEST = 1 ]; then
   if [ $4 = "64" ]; then
     IS64BIT=1
+  elif [ $4 = "32" ]; then
+    IS64BIT=0
   fi
   echo "######## Running one test: $2 expecting $3, is_64_bit=$IS64BIT"
   cd src
@@ -194,7 +203,7 @@ fi
 if [ $MODE_RUN_OCAML_FILE = 1 ]; then
   cd src
   TEST_FILE=$2
-  ocamlopt -o ../tmp/cc_ocaml $OCAML_DEPS ../src/"$2"
+  ocamlopt -o ../tmp/cc_ocaml $OCAML_DEPS ../"$2"
   ../tmp/cc_ocaml
   exit 0
 fi

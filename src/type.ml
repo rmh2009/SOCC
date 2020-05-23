@@ -60,7 +60,7 @@ and declare_t = DeclareStatement of data_type_t * string * expression_t option
 and block_item_t = StatementItem of statement_t | DeclareItem of declare_t
 
 type function_t =
-  | IntFunction of string * string list * block_item_t list option
+  | IntFunction of string * (string * data_type_t) list * block_item_t list option
 
 type program_t = Program of function_t list
 

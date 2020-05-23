@@ -3,7 +3,11 @@ open Type
 open Typeutil
 
 let is_assignable (exp : expression_t) : bool =
-  match exp with VarExp _ -> true | ArrayIndexExp (_, _) -> true | _ -> false
+  match exp with
+  | VarExp _ -> true
+  | ArrayIndexExp (_, _) -> true
+  | DereferenceExp exp -> true
+  | _ -> false
 
 let fail message = raise (TokenError message)
 
@@ -161,7 +165,7 @@ and print_ast (ast : program_t) : string =
         ^ print_declare (spaces + 1) decl
   in
   let print_params params =
-    List.fold_left (fun acc param -> acc ^ param ^ ",") "" params
+    List.fold_left (fun acc (name, dtype) -> acc ^ name ^ ",") "" params
   in
   let print_function spaces f =
     let print_statements spaces sts_opt =
@@ -499,12 +503,16 @@ and parse_block_items (acc : block_item_t list) (tokens : token_t list) :
 
 (* Parses tokens to get a function, returns the function and the remaining tokens. *)
 and parse_function (tokens : token_t list) : function_t * token_t list =
-  let rec parse_parameters acc tokens =
+  let rec parse_parameters (acc : (string * data_type_t) list) tokens :
+      (string * data_type_t) list * token_t list =
     match tokens with
-    | IntKeyword :: Identifier a :: r -> parse_parameters (a :: acc) r
-    | Comma :: IntKeyword :: Identifier a :: r -> parse_parameters (a :: acc) r
     | RightParentheses :: r -> (List.rev acc, tokens)
-    | a :: _ -> fail ("Unexpected token in parse_parameters: " ^ print_token a)
+    | a :: r ->
+        let identifier, dtype, left = parse_data_type tokens in
+        let left =
+          if peek left = Comma then consume_token Comma left else left
+        in
+        parse_parameters ((identifier, dtype) :: acc) left
     | [] -> fail "Expecting token or RightParentheses in parse_parameters."
   in
   match tokens with
@@ -542,5 +550,3 @@ let parse_program (tokens : token_t list) : program_t * token_t list =
 let get_ast (tokens : token_t list) : program_t =
   let program, left_tokens = parse_program tokens in
   program
-
-

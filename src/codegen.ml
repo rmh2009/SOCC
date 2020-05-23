@@ -22,17 +22,17 @@ type var_map_t = {
   static_data : (string * static_data_t) list; (* label and data list *)
 }
 
-let default_var_map = 
-      {
-        vars = VarMap.empty;
-        cur_scope_vars = VarMap.empty;
-        (* Start the offset as 0, since %ebp = %esp. *)
-        index = 0;
-        break_label = "";
-        continue_label = "";
-        function_return_label = "";
-        static_data = [];
-      }
+let default_var_map =
+  {
+    vars = VarMap.empty;
+    cur_scope_vars = VarMap.empty;
+    (* Start the offset as 0, since %ebp = %esp. *)
+    index = 0;
+    break_label = "";
+    continue_label = "";
+    function_return_label = "";
+    static_data = [];
+  }
 
 type context_t = {
   output : string -> unit;
@@ -103,21 +103,16 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
   (* Generate code for calling a function. This includes adding padding for
    * alignment, pushing parameters, remove padding afterwards, etc.*)
   let rec generate_f_call ctx var_map fname exps =
-    if List.length exps > 6 then
-      raise
-        (CodeGenError "Does not support more than 6 params in 64 bit mode yet.");
     add_function_call_padding ctx (List.length exps);
     let rec helper var_map fname exps num_args =
       match exps with
       | [] ->
           ctx.output ("    call    _" ^ fname ^ "\n");
-          (* Function returned, remove arguments from stack. *)
-          (* TODO assumed that function param is always int *)
           (* Remove the padding *)
           remove_function_call_padding ctx num_args
       | a :: r ->
           let t = generate_expression ctx var_map a in
-          if t != IntType then raise (CodeGenError "Fun param has to be int.");
+          ignore t;
           ctx.output "    push   %eax\n";
           helper var_map fname r num_args
     in
@@ -126,6 +121,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
   (* Generate code for calling a function for 64 assmebly. This includes adding
    * padding for alignment, pushing parameters, remove padding afterwards, etc.*)
   and generate_f_call_64 ctx var_map fname exps =
+    if List.length exps > 6 then
+      raise
+        (CodeGenError "Does not support more than 6 params in 64 bit mode yet.");
     add_function_call_padding ctx (List.length exps);
     (* registers is the available registers that can be used to store the function
        * arguments. This feature is a new feature in the x86-64 calling convention. *)
@@ -133,13 +131,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       match exps with
       | [] ->
           ctx.output ("call    _" ^ fname ^ "\n");
-          (* Function returned, remove arguments from stack. *)
-          (* TODO assumed that function param is always int *)
           (* Remove the padding *)
           remove_function_call_padding ctx num_args
       | a :: r -> (
           let t = generate_expression ctx var_map a in
-          if t != IntType then raise (CodeGenError "Fun param has to be int.");
+          ignore t;
           match registers with
           | hd :: tl ->
               ctx.output ("    movq    %rax, " ^ hd ^ "\n");
@@ -180,7 +176,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             | PointerType _ ->
                 gen_command (Mov (Disp (offset, BP), Reg AX)) pvoid
             | CharType ->
-                gen_command (Xor (Reg(AX), Reg(AX))) pvoid;
+                gen_command (Xor (Reg AX, Reg AX)) pvoid;
                 gen_command (Mov (Disp (offset, BP), Reg AX)) CharType
             | x ->
                 CodeGenError ("Unsupported type in VarExp." ^ print_data_type x)
@@ -192,21 +188,23 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
          * the type of exp1, so we need to evaluate exp1 first.*)
         let t = generate_expression ctx var_map exp1 in
         match t with
-        | ArrayType (child_type, size) ->
+        | ArrayType (child_type, _) | PointerType(ArrayType(child_type, _))->
             let off, _, var_map =
               allocate_stack ctx var_map (CG.get_data_size pvoid)
             in
             gen_command (Mov (Reg AX, Disp (off, BP))) pvoid;
             generate_expression ctx var_map exp2 |> ignore;
             gen_command (Mov (Disp (off, BP), Reg CX)) pvoid;
-            gen_command
+            gen_command (Mul (Imm(CG.get_data_size child_type), Reg(AX))) pvoid;
+            gen_command (Add (Reg(CX), Reg(AX))) pvoid;
+            gen_command (Mov (Reg(AX), Reg(DX))) pvoid;
+            (* gen_command
               (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg DX))
-              pvoid;
+              pvoid; *)
             if not (is_type_array child_type) then (
               gen_command (Xor (Reg AX, Reg AX)) pvoid;
-              gen_command (Mov (RegV DX, Reg AX)) child_type)
-            else
-              gen_command (Mov (Reg DX, Reg AX)) pvoid;
+              gen_command (Mov (RegV DX, Reg AX)) child_type )
+            else gen_command (Mov (Reg DX, Reg AX)) pvoid;
             child_type
         | _ ->
             raise
@@ -242,9 +240,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             gen_command (Mov (Reg AX, Disp (off, BP))) pvoid;
             generate_expression ctx var_map exp2 |> ignore;
             gen_command (Mov (Disp (off, BP), Reg CX)) pvoid;
-            gen_command
+            gen_command (Mul (Imm(CG.get_data_size child_type), Reg(AX))) pvoid;
+            gen_command (Add (Reg(CX), Reg(AX))) pvoid;
+            (* gen_command
               (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg AX))
-              pvoid;
+              pvoid; *)
             PointerType child_type
         | _ -> raise (CodeGenError "Expecting an array type in ArrayIndexExp.")
         )
@@ -255,7 +255,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Imm n, Reg AX)) IntType;
         IntType
     | ConstantCharExp a ->
-        gen_command (Xor (Reg(AX), Reg(AX))) pvoid;
+        gen_command (Xor (Reg AX, Reg AX)) pvoid;
         gen_command (Mov (Imm (int_of_char a), Reg AX)) CharType;
         CharType
     | ConstantStringExp a -> raise (CodeGenError "String unimplemented")
@@ -429,9 +429,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             else
               let t_index = generate_expression ctx var_map exp2 in
               gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
-              gen_command
+              gen_command (Mul (Imm(CG.get_data_size element_type), Reg(AX))) pvoid;
+              gen_command (Add (Reg(CX), Reg(AX))) pvoid;
+              (* gen_command
                 (Lea (Index (0, CX, AX, CG.get_data_size element_type), Reg AX))
-                pvoid;
+                pvoid; *)
               (* Reuse the temp_loc here, since it's already popped. *)
               gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
               let t_value = generate_expression ctx var_map exp_r in
@@ -444,6 +446,28 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         | a ->
             CodeGenError ("Type is not assignable: " ^ print_data_type a)
             |> raise )
+    | AssignExp (DereferenceExp exp, exp_r) ->
+        let t = generate_expression ctx var_map exp in
+        let offset, _, var_map =
+          allocate_stack ctx var_map (CG.get_data_size pvoid)
+        in
+        gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
+        let t2 = generate_expression ctx var_map exp_r in
+        ( match t with
+        | PointerType pt ->
+            if pt != t2 then
+              raise
+                (CodeGenError
+                   ( "Type not the same in Assignment expression!"
+                   ^ print_data_type t ^ " vs. " ^ print_data_type t2 ))
+            else ()
+        | a ->
+            raise
+              (CodeGenError ("Type can not be dereferenced! " ^ print_data_type a))
+        );
+        gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
+        gen_command (Mov (Reg AX, RegV CX)) t2;
+        t2
     | AssignExp (_, _) ->
         CodeGenError "Left hand side is not assignable!" |> raise
 
@@ -619,9 +643,12 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         | ArrayType (_, _), Some (label, DataString str) ->
             (* Use memcpy to copy the static string to targe. *)
             output
-              (Printf.sprintf "# --------- memcpy %s %s to array variable: %s -------\n" label
-                 str a);
-            gen_command (Lea(Disp(start_offset, BP), Reg(AX))) (PointerType(VoidType));
+              (Printf.sprintf
+                 "# --------- memcpy %s %s to array variable: %s -------\n"
+                 label str a);
+            gen_command
+              (Lea (Disp (start_offset, BP), Reg AX))
+              (PointerType VoidType);
             CG.call_memcpy AX label (String.length str) |> output
         | _, _ ->
             gen_command (Mov (Reg AX, Disp (start_offset, BP))) data_type
@@ -654,22 +681,23 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
 
   let generate_function (ctx : context_t) (f : function_t) : var_map_t =
     (* Generates the var_map with the references to the function arguments. *)
-    let rec generate_f_var_map ctx var_map fname params index =
+    let rec generate_f_var_map ctx var_map fname
+        (params : (string * data_type_t) list) index : var_map_t =
       match params with
       | [] -> var_map
-      | a :: r ->
+      | (name, dtype) :: r ->
           generate_f_var_map ctx
             {
               var_map with
-              (* TODO We assumed args are always int. *)
-              vars = VarMap.add a (index, IntType, None) var_map.vars;
+              vars = VarMap.add name (index, dtype, None) var_map.vars;
               break_label = "";
               continue_label = "";
             }
             fname r (index + 4)
     in
 
-    let rec generate_f_var_map_64_bit ctx var_map fname params index =
+    let rec generate_f_var_map_64_bit ctx var_map fname
+        (params : (string * data_type_t) list) index : var_map_t =
       (* for 64 bit, we always copy function arguments from registers to stack. *)
       if List.length params > 6 then
         raise
@@ -678,7 +706,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       let rec gen_fun ctx var_map params regs =
         match (params, regs) with
         | [], _ -> var_map
-        | a :: ar, b :: br ->
+        | (name, dtype) :: ar, b :: br ->
             let offset, _, var_map = allocate_stack ctx var_map 8 in
             ctx.output
               (Printf.sprintf "    movq    %s, %d(%s) # moving fun param\n" b
@@ -686,8 +714,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             gen_fun ctx
               {
                 var_map with
-                (* TODO We assumed args are always int. *)
-                vars = VarMap.add a (offset, IntType, None) var_map.vars;
+                vars = VarMap.add name (offset, decay(dtype), None) var_map.vars;
                 break_label = "";
                 continue_label = "";
               }
@@ -748,15 +775,20 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             (* Stack allocation and function body, always make the stack 16 byte aligned. *)
             output "#---------- stack allocation ----------\n";
 
-
             (* This is tricky here, we already have two registered pushed at the beginning of a function,
              * one is the return address saved by call, the other is 'push ebp', so we need to
              * take that into consideration. *)
-            let pvoid = PointerType(VoidType) in
-            let two_additional_push = 2 * CG.get_data_size(pvoid) in
-            let total_stack_size = two_additional_push + ctx_new.get_min_index () in
+            let pvoid = PointerType VoidType in
+            let two_additional_push = 2 * CG.get_data_size pvoid in
+            let total_stack_size =
+              two_additional_push + ctx_new.get_min_index ()
+            in
             gen_command
-              (Add (Imm ((make_aligned_number total_stack_size  16) - two_additional_push), Reg SP))
+              (Add
+                 ( Imm
+                     ( make_aligned_number total_stack_size 16
+                     - two_additional_push ),
+                   Reg SP ))
               (PointerType VoidType);
             output "#---------- function body    ----------\n";
             output (Buffer.contents fun_buf);
@@ -794,11 +826,16 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     match ast with
     | Program fns ->
         let accumulated_var_map =
-        List.fold_left (fun var_map f ->
-          let res_var_map = generate_function ctx f in
-          { res_var_map with static_data = (List.append var_map.static_data res_var_map.static_data)}
-        ) default_var_map fns in
+          List.fold_left
+            (fun var_map f ->
+              let res_var_map = generate_function ctx f in
+              {
+                res_var_map with
+                static_data =
+                  List.append var_map.static_data res_var_map.static_data;
+              })
+            default_var_map fns
+        in
         ctx.output (CG.gen_data_section accumulated_var_map.static_data);
         Buffer.contents buf
-
 end

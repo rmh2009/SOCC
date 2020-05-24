@@ -34,8 +34,9 @@ After this I implemented many more features myself, including a simple type chec
 The stack allocation methods for local and temporary variables are also changed completely to better efficiency and easier migration to 64 bit.
 
 # References:
-https://norasandler.com/2017/11/29/Write-a-Compiler.html
-https://www.lri.fr/~filliatr/ens/compil/x86-64.pdf
+ - https://norasandler.com/2017/11/29/Write-a-Compiler.html
+ - Some note with x86 64 calling conventions: https://www.lri.fr/~filliatr/ens/compil/x86-64.pdf
+ - gcc assembly output with -S :).
 
 # Note 1 : The support for array data type.
 [May 8 2020]

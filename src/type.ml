@@ -68,7 +68,5 @@ type function_t =
 
 type program_t = Program of function_t list
 
-exception TokenError of string
-
 type static_data_t = DataInt of int | DataString of string
 

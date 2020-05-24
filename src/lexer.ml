@@ -21,7 +21,7 @@ let read_file_content (file_name : string) : string =
 
 exception LexerError of string
 
-let fail msg = raise (LexerError(msg))
+let fail msg = raise (LexerError msg)
 
 let is_number (c : char) : bool = if c >= '0' && c <= '9' then true else false
 
@@ -71,14 +71,13 @@ let parse_tokens (content : string) : token_t list =
     else parse_string_literal (acc ^ String.make 1 content.[i]) content (i + 1)
   in
 
-  let rec consume_after_new_line content i =
+  let rec consume_after_new_line content i : token_t * int =
     if i >= String.length content then (EndOfFile, i)
     else
       match content.[i] with
       | '\n' -> parse_one_token content (i + 1)
       | a -> consume_after_new_line content (i + 1)
-
-  and parse_one_token content i =
+  and parse_one_token content i : token_t * int =
     if i >= String.length content then (EndOfFile, i)
     else
       match content.[i] with
@@ -97,8 +96,8 @@ let parse_tokens (content : string) : token_t list =
       | '~' -> (BitComplement, i + 1)
       | '+' -> (Addition, i + 1)
       | '*' -> (Multiplication, i + 1)
-      | '/' -> 
-          if content.[i+1] = '/' then consume_after_new_line content (i+1)
+      | '/' ->
+          if content.[i + 1] = '/' then consume_after_new_line content (i + 1)
           else (Division, i + 1)
       | ':' -> (Colon, i + 1)
       | '?' -> (QuestionMark, i + 1)
@@ -121,10 +120,13 @@ let parse_tokens (content : string) : token_t list =
           if is_alphanumeric a then parse_keyword_identifier_literal content i
           else fail ("Illegal character: " ^ String.make 1 a)
   in
-  let rec parse_tokens_acc tokens content i =
+  let rec parse_tokens_acc tokens content i : token_t list =
     let token, new_i = parse_one_token content i in
-    if new_i < String.length content then
-      parse_tokens_acc (token :: tokens) content new_i
-    else tokens
+    match token with
+    | EndOfFile -> tokens
+    | _ ->
+        if new_i < String.length content then
+          parse_tokens_acc (token :: tokens) content new_i
+        else token :: tokens
   in
   List.rev (parse_tokens_acc [] content 0)

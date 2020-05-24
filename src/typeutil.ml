@@ -1,6 +1,8 @@
 open Type
 open Tokens
 
+exception ParseTypeError of string
+
 let parse_data_type (tokens : token_t list) :
     string * data_type_t * token_t list =
   let rec helper name_opt cur_type tokens =
@@ -9,7 +11,7 @@ let parse_data_type (tokens : token_t list) :
     | Identifier name :: r ->
         if name_opt = None then helper (Some name) cur_type r
         else
-          TokenError
+          ParseTypeError
             ("Already parsed an identifier, found another identifer: " ^ name)
           |> raise
     | LeftBracket :: Literal (IntLiteral a) :: RightBracket :: r ->
@@ -23,12 +25,12 @@ let parse_data_type (tokens : token_t list) :
     | DoubleKeyword :: r -> helper None DoubleType r
     | FloatKeyword :: r -> helper None FloatType r
     | x :: r ->
-        TokenError ("Illegal token in parse type: " ^ Debug.print_token x) |> raise
+        ParseTypeError ("Illegal token in parse type: " ^ Debug.print_token x) |> raise
     | [] -> 
-        TokenError ("Empty tokens in parse_data_type.") |> raise
+        ParseTypeError ("Empty tokens in parse_data_type.") |> raise
   in
   match name_opt with
-  | None -> TokenError "Failed to get declared name in parse_type." |> raise
+  | None -> ParseTypeError "Failed to get declared name in parse_type." |> raise
   | Some name -> (name, cur_type, r)
 
 let is_type_array (data_type : data_type_t) =

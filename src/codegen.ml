@@ -495,18 +495,17 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         ( match t with
         | PointerType pt ->
             if pt != t2 then
-                   fail ( "Type not the same in Assignment expression!"
-                   ^ Debug.print_data_type t ^ " vs. "
-                   ^ Debug.print_data_type t2 )
+              fail
+                ( "Type not the same in Assignment expression!"
+                ^ Debug.print_data_type t ^ " vs. " ^ Debug.print_data_type t2
+                )
             else ()
-        | a ->
-                 fail ("Type can not be dereferenced! " ^ Debug.print_data_type a)
+        | a -> fail ("Type can not be dereferenced! " ^ Debug.print_data_type a)
         );
         gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
         gen_command (Mov (Reg AX, RegV CX)) t2;
         t2
-    | AssignExp (_, _) ->
-        fail "Left hand side is not assignable!"
+    | AssignExp (_, _) -> fail "Left hand side is not assignable!"
 
   (* Updates the continue_label and break_label fields in the given var_map. *)
   let update_break_continue_label (var_map : var_map_t) (break : string)
@@ -607,13 +606,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         output (end_label ^ ":\n");
         var_map
     | StatementItem BreakStatement ->
-        if var_map.break_label = "" then
-          fail "Illegal break, no context.";
+        if var_map.break_label = "" then fail "Illegal break, no context.";
         gen_command (Jmp var_map.break_label) IntType;
         var_map
     | StatementItem ContinueStatement ->
-        if var_map.continue_label = "" then
-          fail "Illegal jump, no context.";
+        if var_map.continue_label = "" then fail "Illegal jump, no context.";
         gen_command (Jmp var_map.continue_label) IntType;
         var_map
     | StatementItem (WhileStatement (exp, st)) ->
@@ -693,7 +690,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
 
         match VarMap.find_opt a var_map.cur_scope_vars with
         | Some (_, _, _) ->
-                 fail ("Var " ^ a ^ " is already defined in current scope!")
+            fail ("Var " ^ a ^ " is already defined in current scope!")
         | None ->
             {
               var_map with
@@ -735,7 +732,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         (params : (string * data_type_t) list) index : var_map_t =
       (* for 64 bit, we always copy function arguments from registers to stack. *)
       if List.length params > 6 then
-             fail "Only support at most 6 function params now in 64 bit mode.";
+        fail "Only support at most 6 function params now in 64 bit mode.";
       let rec gen_fun ctx var_map params regs =
         match (params, regs) with
         | [], _ -> var_map
@@ -752,8 +749,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
                 continue_label = "";
               }
               ar br
-        | _, _ ->
-            fail "Unexpectd case in generate_f_var_map_64_bit."
+        | _, _ -> fail "Unexpectd case in generate_f_var_map_64_bit."
       in
       gen_fun ctx var_map params CG.fun_arg_registers_64
     in

@@ -66,9 +66,9 @@ run_code() {
   # Compile the generated assembly into executable and run.
   # Use the brew installed gcc since the default gcc in macos no longer supports 32bit.
   if [ $IS64BIT = 1 ]; then
-    gcc -v assembly.s -o out
+    gcc assembly.s -o out
   else 
-    gcc -v -arch i386 assembly.s -o out
+    gcc -arch i386 assembly.s -o out
   fi
 
   if [ $? -ne 0 ]; then
@@ -105,7 +105,7 @@ run_test()  {
   if [ -z $expected_output ]; then
     echo "skipping expected_output since it's unset."
   else
-    if [ $expected_output != "$std_output" ]; then
+    if [ "$expected_output" != "$std_output" ]; then
       echo "*********** ( Failed testing $cc_file, expecting std output $expected_output, actual $std_output ) "
       failed_tests="$failed_tests ( Failed testing $cc_file, expecting std output $expected_output, actual $std_output ) "
     fi
@@ -173,9 +173,9 @@ run_test "coding_problems/8_queen.c" 92
 }
 
 if [ $MODE_ALL_TEST = 1 ]; then
-  if [ $2 = "64" ]; then
+  if [ "$2" = "64" ]; then
     IS64BIT=1
-  elif [ $2 = "32" ]; then
+  elif [ "$2" = "32" ]; then
     IS64BIT=0
   fi
 

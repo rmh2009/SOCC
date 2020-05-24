@@ -100,7 +100,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | ArrayType (t2, size) -> size * get_data_size t2
     | PointerType _ -> if is_64_bit then 8 else 4
     | CharType -> 1
-    | _ -> TokenError "Unsupported data type." |> raise
+    | _ -> CodeGenUtilError "Unsupported data type." |> raise
 
   (* This is the footprint when evaluated after expression, i.e. saved in register. *)
   let rec get_exp_data_size (t : data_type_t) : int =
@@ -109,7 +109,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | ArrayType (t2, size) -> if is_64_bit then 8 else 4
     | PointerType _ -> if is_64_bit then 8 else 4
     | CharType -> 1
-    | _ -> TokenError "Unsupported data type." |> raise
+    | _ -> CodeGenUtilError "Unsupported data type." |> raise
 
   let gen_register (r : register_t) (dtype : data_type_t) =
     let dsize = get_exp_data_size dtype in

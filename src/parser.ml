@@ -9,7 +9,9 @@ let is_assignable (exp : expression_t) : bool =
   | DereferenceExp exp -> true
   | _ -> false
 
-let fail message = raise (TokenError message)
+exception ParserError of string
+
+let fail message = raise (ParserError message)
 
 let peek (tokens : token_t list) : token_t =
   match tokens with [] -> fail "No tokens left in peek tokens." | a :: _ -> a

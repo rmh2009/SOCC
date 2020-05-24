@@ -24,11 +24,18 @@ Implemented features:
  - Supports both 32 bit and 64 bit x86 assembly (see note4).
  - Support for char and char array initialization.
 
-Features missing:
+Some features missing:
  - Support for struct.
  - Support for float/double.
+ - And more...
 
-So far I've been mostly following this article here: https://norasandler.com/2017/11/29/Write-a-Compiler.html. This article stopped at implementing function calls (As of May 2020). After this I implemented a simple type checking system, support for arrays etc. on my own. I plan to keep adding more features gradually and will summarize my solution below.
+Initially I read Nora's article (see the reference) on how to write a C compiler, but at the time the article stopped at implementing function calls (As of May 2020).
+After this I implemented many more features myself, including a simple type checking system, support for arrays, pointers, more data types such as char, string initializations, supporting both 64bit and 32bit assembly, etc. (See notes below for details of implementation)
+The stack allocation methods for local and temporary variables are also changed completely to better efficiency and easier migration to 64 bit.
+
+# References:
+https://norasandler.com/2017/11/29/Write-a-Compiler.html
+https://www.lri.fr/~filliatr/ens/compil/x86-64.pdf
 
 # Note 1 : The support for array data type.
 [May 8 2020]

@@ -1,17 +1,5 @@
 open Type
-open Lexer
-
-let rec print_data_type (t : data_type_t) : string =
-  match t with
-  | IntType -> "IntType"
-  | FloatType -> "FloatType"
-  | DoubleType -> "DoubleType"
-  | CharType -> "CharType"
-  | ArrayType (t, size) ->
-      "Array of (" ^ print_data_type t ^ ")[" ^ string_of_int size ^ "]"
-  | PointerType t -> "Pointer of " ^ print_data_type t
-  | UnknownType -> "UnknownType"
-  | VoidType -> "VoidType"
+open Tokens
 
 let parse_data_type (tokens : token_t list) :
     string * data_type_t * token_t list =
@@ -35,7 +23,7 @@ let parse_data_type (tokens : token_t list) :
     | DoubleKeyword :: r -> helper None DoubleType r
     | FloatKeyword :: r -> helper None FloatType r
     | x :: r ->
-        TokenError ("Illegal token in parse type: " ^ print_token x) |> raise
+        TokenError ("Illegal token in parse type: " ^ Debug.print_token x) |> raise
     | [] -> 
         TokenError ("Empty tokens in parse_data_type.") |> raise
   in

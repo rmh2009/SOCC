@@ -1,13 +1,10 @@
-open Lexer
-open Parser
-open Codegen
 open Codegen_util
 
-module CGS = MakeCodeGen(MakeCodeGenUtil (System64Bit))
+module CGS = Codegen.MakeCodeGen(Codegen_util.MakeCodeGenUtil (System64Bit))
 
 let _ =
-  let ast = get_ast (parse_tokens (read_file_content "test.cc")) in
-  Printf.printf "\nParsed AST: \n%s" (print_ast ast);
+  let ast = Parser.get_ast (Lexer.parse_tokens (Lexer.read_file_content "test.cc")) in
+  Printf.printf "\nParsed AST: \n%s" (Debug.print_ast ast);
 
   let code = CGS.generate_assembly ast in
 

@@ -1,51 +1,4 @@
-type literal_t =
-  | IntLiteral of int
-  | StringLiteral of string
-  | CharLiteral of char
-  | FloatLiteral of float
-
-type token_t =
-  | IntKeyword
-  | CharKeyword
-  | FloatKeyword
-  | DoubleKeyword
-  | LeftParentheses
-  | RightParentheses
-  | LeftBrace
-  | RightBrace
-  | LeftBracket
-  | RightBracket
-  | ReturnKeyword
-  | Identifier of string
-  | Literal of literal_t
-  | Semicolon
-  | Negation (* this is also Minus *)
-  | LogicalNegation (* this is the ! sign *)
-  | BitComplement
-  | Addition
-  | Multiplication (* Also pointer declaration and dereference *)
-  | Division
-  | EndOfFile
-  | And
-  | Or
-  | Equal
-  | NotEqual
-  | Less
-  | LessOrEqual
-  | Greater
-  | GreaterOrEqual
-  | Assignment
-  | IfKeyword
-  | ElseKeyword
-  | Colon
-  | QuestionMark
-  | ForKeyword
-  | WhileKeyword
-  | DoKeyword
-  | BreakKeyword
-  | ContinueKeyword
-  | Comma
-  | Address
+open Tokens
 
 let is_type_keyword token : bool =
   if token = IntKeyword then true
@@ -66,58 +19,9 @@ let read_file_content (file_name : string) : string =
     assert false
   with End_of_file -> Buffer.contents buf
 
-let print_token (token : token_t) : string =
-  let print_literal l =
-    match l with
-    | StringLiteral s -> "String Literal: " ^ s
-    | IntLiteral i -> "Int Literal: " ^ string_of_int i
-    | CharLiteral c -> "Char Literal: " ^ String.make 1 c
-    | FloatLiteral f -> "Float Literal: " ^ string_of_float f
-  in
-  match token with
-  | IntKeyword -> "IntKeyword"
-  | LeftParentheses -> "LeftParentheses"
-  | RightParentheses -> "RightParentheses"
-  | LeftBrace -> "LeftBrace"
-  | RightBrace -> "RightBrace"
-  | LeftBracket -> "LeftBracket"
-  | RightBracket -> "RightBracket"
-  | ReturnKeyword -> "ReturnKeyword"
-  | Identifier a -> "Identifier: " ^ a
-  | Literal l -> print_literal l
-  | Semicolon -> "Semicolon"
-  | Negation -> "Negation -"
-  | LogicalNegation -> "LogicalNegation !"
-  | BitComplement -> "BitComplement ~"
-  | Addition -> "Addition"
-  | Multiplication -> "Multiplication"
-  | Division -> "Division"
-  | EndOfFile -> "EndOfFile"
-  | And -> "And"
-  | Or -> "Or"
-  | Equal -> "Equal"
-  | NotEqual -> "NotEqual"
-  | Less -> "Less"
-  | LessOrEqual -> "LessOrEqual"
-  | Greater -> "Greater"
-  | GreaterOrEqual -> "GreaterOrEqual"
-  | Assignment -> "Assignment"
-  | IfKeyword -> "If"
-  | ElseKeyword -> "Else"
-  | Colon -> "Colon"
-  | QuestionMark -> "QuestionMark"
-  | ForKeyword -> "For"
-  | WhileKeyword -> "While"
-  | DoKeyword -> "Do"
-  | BreakKeyword -> "Break"
-  | ContinueKeyword -> "Continue"
-  | Comma -> "Comma"
-  | Address -> "Address"
-  | CharKeyword -> "Char"
-  | FloatKeyword -> "Float"
-  | DoubleKeyword -> "Double"
-
 exception LexerError of string
+
+let fail msg = raise (LexerError(msg))
 
 let is_number (c : char) : bool = if c >= '0' && c <= '9' then true else false
 
@@ -157,12 +61,12 @@ let parse_tokens (content : string) : token_t list =
   let parse_char content i =
     let c = content.[i] in
     if content.[i + 1] = '\'' then (Literal (CharLiteral c), i + 2)
-    else raise (LexerError "Expecting Right Single Quote in parse_char.")
+    else fail "Expecting Right Single Quote in parse_char."
   in
   (* Parses a string literal. *)
   let rec parse_string_literal acc content i =
     if i >= String.length content then
-      LexerError "Unexpected end of file in parse_string_literal." |> raise
+      fail "Unexpected end of file in parse_string_literal."
     else if content.[i] = '"' then (Literal (StringLiteral acc), i + 1)
     else parse_string_literal (acc ^ String.make 1 content.[i]) content (i + 1)
   in
@@ -201,7 +105,7 @@ let parse_tokens (content : string) : token_t list =
       | '&' -> if content.[i + 1] = '&' then (And, i + 2) else (Address, i + 1)
       | '|' ->
           if content.[i + 1] = '|' then (Or, i + 2)
-          else raise (LexerError "Expeting another | sign.")
+          else fail "Expeting another | sign."
       | '=' ->
           if content.[i + 1] = '=' then (Equal, i + 2) else (Assignment, i + 1)
       | '>' ->
@@ -215,7 +119,7 @@ let parse_tokens (content : string) : token_t list =
       | '"' -> parse_string_literal "" content (i + 1)
       | a ->
           if is_alphanumeric a then parse_keyword_identifier_literal content i
-          else raise (LexerError ("Illegal character: " ^ String.make 1 a))
+          else fail ("Illegal character: " ^ String.make 1 a)
   in
   let rec parse_tokens_acc tokens content i =
     let token, new_i = parse_one_token content i in

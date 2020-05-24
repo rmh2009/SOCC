@@ -40,7 +40,7 @@ else
   exit 1
 fi
 
-OCAML_DEPS="../src/lexer.ml ../src/type.ml ../src/typeutil.ml ../src/parser.ml ../src/util.ml ../src/codegen_util.ml ../src/codegen.ml "
+OCAML_DEPS="../src/tokens.ml  ../src/type.ml ../src/debug.ml ../src/typeutil.ml ../src/lexer.ml ../src/parser.ml ../src/util.ml ../src/codegen_util.ml ../src/codegen.ml "
 
 # Compile the compiler, then use it to compile the test.c file into assembly.s.
 compile_code() {

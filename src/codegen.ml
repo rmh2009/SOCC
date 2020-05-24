@@ -1,5 +1,4 @@
-open Lexer
-open Parser
+open Tokens
 open Util
 open Type
 open Typeutil
@@ -7,6 +6,8 @@ open Codegen_util
 module VarMap = Map.Make (String)
 
 exception CodeGenError of string
+
+let fail msg = raise (CodeGenError msg)
 
 type var_map_t = {
   (* (offset, data_type_t, global_data_label), if the global_data_label exists it means
@@ -95,9 +96,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       ctx.output "    popl %edx\n    addl %edx, %esp\n" )
     else (
       if num_args > 6 then
-        raise
-          (CodeGenError
-             "Does not support more than 6 params in 64 bit mode yet.");
+        fail "Does not support more than 6 params in 64 bit mode yet.";
       ctx.output "    popq %rdx\n    addq %rdx, %rsp\n" )
 
   (* Generate code for calling a function. This includes adding padding for
@@ -122,8 +121,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
    * padding for alignment, pushing parameters, remove padding afterwards, etc.*)
   and generate_f_call_64 ctx var_map fname exps =
     if List.length exps > 6 then
-      raise
-        (CodeGenError "Does not support more than 6 params in 64 bit mode yet.");
+      fail "Does not support more than 6 params in 64 bit mode yet.";
     add_function_call_padding ctx (List.length exps);
     (* registers is the available registers that can be used to store the function
        * arguments. This feature is a new feature in the x86-64 calling convention. *)
@@ -167,7 +165,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     match exp with
     | VarExp a -> (
         match VarMap.find_opt a var_map.vars with
-        | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+        | None -> fail ("Variable " ^ a ^ " is undefined.")
         | Some (offset, t, _) ->
             ( match t with
             | IntType -> gen_command (Mov (Disp (offset, BP), Reg AX)) IntType
@@ -178,70 +176,57 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             | CharType ->
                 gen_command (Xor (Reg AX, Reg AX)) pvoid;
                 gen_command (Mov (Disp (offset, BP), Reg AX)) CharType
-            | x ->
-                CodeGenError ("Unsupported type in VarExp." ^ print_data_type x)
-                |> raise );
+            | x -> fail ("Unsupported type in VarExp." ^ Debug.print_data_type x)
+            );
             t )
     | PreIncExp exp -> (
         match exp with
         | VarExp a -> (
             match VarMap.find_opt a var_map.vars with
-            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | None -> fail ("Variable " ^ a ^ " is undefined.")
             | Some (offset, t, _) ->
                 gen_command (Inc (Disp (offset, BP))) t;
                 gen_command (Mov (Disp (offset, BP), Reg AX)) t;
                 t )
         | ArrayIndexExp (exp1, exp2) ->
-            raise (CodeGenError "PreInc of ArrayIndex not implemented yet.")
-        | _ ->
-            raise
-              (CodeGenError "PreIncExp expecting VarExp or ArrayIndexExp only.")
-        )
+            fail "PreInc of ArrayIndex not implemented yet."
+        | _ -> fail "PreIncExp expecting VarExp or ArrayIndexExp only." )
     | PostIncExp exp -> (
         match exp with
         | VarExp a -> (
             match VarMap.find_opt a var_map.vars with
-            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | None -> fail ("Variable " ^ a ^ " is undefined.")
             | Some (offset, t, _) ->
                 gen_command (Mov (Disp (offset, BP), Reg AX)) t;
                 gen_command (Inc (Disp (offset, BP))) t;
                 t )
         | ArrayIndexExp (exp1, exp2) ->
-            raise (CodeGenError "PostInc of ArrayIndex not implemented yet.")
-        | _ ->
-            raise
-              (CodeGenError "PostIncExp expecting VarExp or ArrayIndexExp only.")
-        )
+            fail "PostInc of ArrayIndex not implemented yet."
+        | _ -> fail "PostIncExp expecting VarExp or ArrayIndexExp only." )
     | PreDecExp exp -> (
         match exp with
         | VarExp a -> (
             match VarMap.find_opt a var_map.vars with
-            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | None -> fail ("Variable " ^ a ^ " is undefined.")
             | Some (offset, t, _) ->
                 gen_command (Dec (Disp (offset, BP))) t;
                 gen_command (Mov (Disp (offset, BP), Reg AX)) t;
                 t )
         | ArrayIndexExp (exp1, exp2) ->
-            raise (CodeGenError "PreDec of ArrayIndex not implemented yet.")
-        | _ ->
-            raise
-              (CodeGenError "PreDecExp expecting VarExp or ArrayIndexExp only.")
-        )
+            fail "PreDec of ArrayIndex not implemented yet."
+        | _ -> fail "PreDecExp expecting VarExp or ArrayIndexExp only." )
     | PostDecExp exp -> (
         match exp with
         | VarExp a -> (
             match VarMap.find_opt a var_map.vars with
-            | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+            | None -> fail ("Variable " ^ a ^ " is undefined.")
             | Some (offset, t, _) ->
                 gen_command (Mov (Disp (offset, BP), Reg AX)) t;
                 gen_command (Dec (Disp (offset, BP))) t;
                 t )
         | ArrayIndexExp (exp1, exp2) ->
-            raise (CodeGenError "PostDec of ArrayIndex not implemented yet.")
-        | _ ->
-            raise
-              (CodeGenError "PostDecExp expecting VarExp or ArrayIndexExp only.")
-        )
+            fail "PostDec of ArrayIndex not implemented yet."
+        | _ -> fail "PostDecExp expecting VarExp or ArrayIndexExp only." )
     | ArrayIndexExp (exp1, exp2) -> (
         (* exp1 must be of type Array, in the current implementation types are evaluated
          * during code generation, the evaluation result and step size also depends on
@@ -267,28 +252,27 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             else gen_command (Mov (Reg DX, Reg AX)) pvoid;
             child_type
         | _ ->
-            raise
-              (CodeGenError
-                 ( "Target is not array type: " ^ print_expression 0 exp1
-                 ^ ", actual type: " ^ print_data_type t )) )
+            fail
+              ( "Target is not array type: "
+              ^ Debug.print_expression 0 exp1
+              ^ ", actual type: " ^ Debug.print_data_type t ) )
     | DereferenceExp exp -> (
         let t = generate_expression ctx var_map exp in
         if not (is_type_pointer t) then
-          raise (CodeGenError "Only pointer type can be dereferenced.")
+          fail "Only pointer type can be dereferenced."
         else gen_command (Mov (RegV AX, Reg AX)) t;
         match t with
         | PointerType inner -> inner
-        | _ ->
-            raise (CodeGenError "Expecting a pointer type in DereferenceExp.") )
+        | _ -> fail "Expecting a pointer type in DereferenceExp." )
     | AddressOfExp (VarExp a) -> (
         match VarMap.find_opt a var_map.vars with
-        | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+        | None -> fail ("Variable " ^ a ^ " is undefined.")
         | Some (offset, t, _) -> (
             match t with
             | IntType | ArrayType (_, _) | PointerType _ ->
                 gen_command (Lea (Disp (offset, BP), Reg AX)) pvoid;
                 PointerType t
-            | _ -> raise (CodeGenError "Illegal type in AddressOfExp.") ) )
+            | _ -> fail "Illegal type in AddressOfExp." ) )
     | AddressOfExp (ArrayIndexExp (exp1, exp2)) -> (
         (* TODO remove this duplicate code with the ArrayIndexExp code above. *)
         let t = generate_expression ctx var_map exp1 in
@@ -306,11 +290,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
                (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg AX))
                pvoid; *)
             PointerType child_type
-        | _ -> raise (CodeGenError "Expecting an array type in ArrayIndexExp.")
-        )
+        | _ -> fail "Expecting an array type in ArrayIndexExp." )
     | AddressOfExp _ ->
-        raise
-          (CodeGenError "Can only take address of array element or varaible.")
+        fail "Can only take address of array element or varaible."
     | ConstantIntExp n ->
         gen_command (Mov (Imm n, Reg AX)) IntType;
         IntType
@@ -318,8 +300,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Xor (Reg AX, Reg AX)) pvoid;
         gen_command (Mov (Imm (int_of_char a), Reg AX)) CharType;
         CharType
-    | ConstantStringExp a -> raise (CodeGenError "String unimplemented")
-    | ConstantFloatExp a -> raise (CodeGenError "Float unimplemented")
+    | ConstantStringExp a -> fail "String unimplemented"
+    | ConstantFloatExp a -> fail "Float unimplemented"
     | FunctionCallExp (fname, exps) ->
         if CG.is_32_bit then generate_f_call ctx var_map fname exps
         else generate_f_call_64 ctx var_map fname exps;
@@ -376,10 +358,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         let t2 = generate_expression ctx var_map exp2 in
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
         if CG.get_data_size t1 != CG.get_data_size t2 then
-          raise
-            (CodeGenError
-               ( "t1 and t2 not equal in binary operation: "
-               ^ print_data_type t1 ^ ", " ^ print_data_type t2 ));
+          fail
+            ( "t1 and t2 not equal in binary operation: "
+            ^ Debug.print_data_type t1 ^ ", " ^ Debug.print_data_type t2 );
         gen_command (Mul (Reg CX, Reg AX)) t1;
         t1
     | DivideExp (exp1, exp2) ->
@@ -390,16 +371,15 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Reg AX, Disp (off, BP))) t2;
         let t1 = generate_expression ctx var_map exp1 in
         if CG.get_data_size t1 != CG.get_data_size t2 then
-          raise
-            (CodeGenError
-               ( "t1 and t2 not equal in binary operation: "
-               ^ print_data_type t1 ^ ", " ^ print_data_type t2 ));
+          fail
+            ( "t1 and t2 not equal in binary operation: "
+            ^ Debug.print_data_type t1 ^ ", " ^ Debug.print_data_type t2 );
 
         (* need to sign extend eax to 64 bit edx:eax if t1 is 32bit, or sign extend rax to 128 bit rdx:rax if 64bit *)
         let dsize = CG.get_data_size t1 in
         if dsize = 4 then output "cdq\n"
         else if dsize = 8 then output "cqto"
-        else raise (CodeGenError "Division of unsupported data type.");
+        else fail "Division of unsupported data type.";
 
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
         gen_command (Div (Reg CX)) t1;
@@ -462,14 +442,13 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         let t3 = generate_expression ctx var_map exp3 in
         output (cond_end_label ^ ":\n");
         if CG.get_data_size t2 != CG.get_data_size t3 then
-          raise
-            (CodeGenError
-               ( "t1 and t2 not equal in binary operation: "
-               ^ print_data_type t2 ^ ", " ^ print_data_type t3 ));
+          fail
+            ( "t1 and t2 not equal in binary operation: "
+            ^ Debug.print_data_type t2 ^ ", " ^ Debug.print_data_type t3 );
         t2
     | AssignExp (VarExp a, exp) -> (
         match VarMap.find_opt a var_map.vars with
-        | None -> raise (CodeGenError ("Variable " ^ a ^ " is undefined."))
+        | None -> fail ("Variable " ^ a ^ " is undefined.")
         | Some (offset, t, _) ->
             let t = generate_expression ctx var_map exp in
             gen_command (Mov (Reg AX, Disp (offset, BP))) t;
@@ -485,7 +464,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         match t with
         | ArrayType (element_type, size) ->
             if is_type_array element_type then
-              raise (CodeGenError "Only 1-D array is assignable.")
+              fail "Only 1-D array is assignable."
             else
               let t_index = generate_expression ctx var_map exp2 in
               gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
@@ -505,9 +484,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               ignore t_index;
               ignore t_value;
               element_type
-        | a ->
-            CodeGenError ("Type is not assignable: " ^ print_data_type a)
-            |> raise )
+        | a -> fail ("Type is not assignable: " ^ Debug.print_data_type a) )
     | AssignExp (DereferenceExp exp, exp_r) ->
         let t = generate_expression ctx var_map exp in
         let offset, _, var_map =
@@ -518,20 +495,18 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         ( match t with
         | PointerType pt ->
             if pt != t2 then
-              raise
-                (CodeGenError
-                   ( "Type not the same in Assignment expression!"
-                   ^ print_data_type t ^ " vs. " ^ print_data_type t2 ))
+                   fail ( "Type not the same in Assignment expression!"
+                   ^ Debug.print_data_type t ^ " vs. "
+                   ^ Debug.print_data_type t2 )
             else ()
         | a ->
-            raise
-              (CodeGenError
-                 ("Type can not be dereferenced! " ^ print_data_type a)) );
+                 fail ("Type can not be dereferenced! " ^ Debug.print_data_type a)
+        );
         gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
         gen_command (Mov (Reg AX, RegV CX)) t2;
         t2
     | AssignExp (_, _) ->
-        CodeGenError "Left hand side is not assignable!" |> raise
+        fail "Left hand side is not assignable!"
 
   (* Updates the continue_label and break_label fields in the given var_map. *)
   let update_break_continue_label (var_map : var_map_t) (break : string)
@@ -633,12 +608,12 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         var_map
     | StatementItem BreakStatement ->
         if var_map.break_label = "" then
-          raise (CodeGenError "Illegal break, no context.");
+          fail "Illegal break, no context.";
         gen_command (Jmp var_map.break_label) IntType;
         var_map
     | StatementItem ContinueStatement ->
         if var_map.continue_label = "" then
-          raise (CodeGenError "Illegal jump, no context.");
+          fail "Illegal jump, no context.";
         gen_command (Jmp var_map.continue_label) IntType;
         var_map
     | StatementItem (WhileStatement (exp, st)) ->
@@ -718,9 +693,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
 
         match VarMap.find_opt a var_map.cur_scope_vars with
         | Some (_, _, _) ->
-            raise
-              (CodeGenError
-                 ("Var " ^ a ^ " is already defined in current scope!"))
+                 fail ("Var " ^ a ^ " is already defined in current scope!")
         | None ->
             {
               var_map with
@@ -762,9 +735,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         (params : (string * data_type_t) list) index : var_map_t =
       (* for 64 bit, we always copy function arguments from registers to stack. *)
       if List.length params > 6 then
-        raise
-          (CodeGenError
-             "Only support at most 6 function params now in 64 bit mode.");
+             fail "Only support at most 6 function params now in 64 bit mode.";
       let rec gen_fun ctx var_map params regs =
         match (params, regs) with
         | [], _ -> var_map
@@ -782,7 +753,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               }
               ar br
         | _, _ ->
-            raise (CodeGenError "Unexpectd case in generate_f_var_map_64_bit.")
+            fail "Unexpectd case in generate_f_var_map_64_bit."
       in
       gen_fun ctx var_map params CG.fun_arg_registers_64
     in

@@ -1,4 +1,4 @@
-open Lexer
+open Tokens
 open Type
 open Typeutil
 
@@ -20,180 +20,12 @@ let consume_token (token : token_t) (tokens : token_t list) : token_t list =
       if hd = token then tl
       else
         fail
-          ( "Failed to consume token: " ^ print_token token ^ ", saw token: "
-          ^ print_token hd )
+          ( "Failed to consume token: " ^ Debug.print_token token ^ ", saw token: "
+          ^ Debug.print_token hd )
   | [] ->
       fail
         ( "No tokens left in consuming tokens, expecting token: "
-        ^ print_token token )
-
-let rec print_expression spaces exp =
-  let rec print_binary spaces op exp1 exp2 =
-    String.make spaces ' ' ^ op ^ " of \n"
-    ^ print_expression (spaces + 1) exp1
-    ^ print_expression (spaces + 1) exp2
-  in
-  let print_space str = String.make spaces ' ' ^ str in
-  let print_exp e = print_expression (spaces + 1) e in
-  match exp with
-  | VarExp a -> String.make spaces ' ' ^ "Ref of " ^ a ^ "\n"
-  | ArrayIndexExp (arr, index) ->
-      print_space "ArrayIndex:\n" ^ print_exp arr ^ print_exp index
-  | DereferenceExp exp -> print_space "PointerDereference:\n" ^ print_exp exp
-  | AddressOfExp exp ->
-      String.make spaces ' ' ^ "AddressOf:\n"
-      ^ print_expression (spaces + 1) exp
-  | ConstantIntExp n ->
-      String.make spaces ' ' ^ "IntegerExpression: " ^ string_of_int n ^ "\n"
-  | ConstantCharExp n ->
-      String.make spaces ' ' ^ "CharExpression: " ^ String.make 1 n ^ "\n"
-  | ConstantFloatExp n ->
-      String.make spaces ' ' ^ "FloatExpression: " ^ string_of_float n ^ "\n"
-  | ConstantStringExp n ->
-      String.make spaces ' ' ^ "StringExpression: " ^ n ^ "\n"
-  | PreIncExp exp ->
-      String.make spaces ' ' ^ "PreInc : " ^ print_expression (spaces + 1) exp
-  | PostIncExp exp ->
-      String.make spaces ' ' ^ "PostInc : " ^ print_expression (spaces + 1) exp
-  | PreDecExp exp ->
-      String.make spaces ' ' ^ "PreDec : " ^ print_expression (spaces + 1) exp
-  | PostDecExp exp ->
-      String.make spaces ' ' ^ "PostDec : " ^ print_expression (spaces + 1) exp
-  | NegateOp exp ->
-      String.make spaces ' ' ^ "NegateOp:\n" ^ print_expression (spaces + 1) exp
-  | LogicalNegateOp exp ->
-      String.make spaces ' ' ^ "LogicalNegateOp:\n"
-      ^ print_expression (spaces + 1) exp
-  | ComplementOp exp ->
-      String.make spaces ' ' ^ "ComplementOp:\n"
-      ^ print_expression (spaces + 1) exp
-  | GroupedExpression exp ->
-      String.make spaces ' ' ^ "Grouped:\n" ^ print_expression (spaces + 1) exp
-  | MultiExp (exp1, exp2) ->
-      String.make spaces ' ' ^ "Multiplication of \n"
-      ^ print_expression (spaces + 1) exp1
-      ^ print_expression (spaces + 1) exp2
-  | DivideExp (exp1, exp2) -> print_binary spaces "Division" exp1 exp2
-  | AdditionExp (exp1, exp2) -> print_binary spaces "Addition" exp1 exp2
-  | MinusExp (exp1, exp2) -> print_binary spaces "Minus" exp1 exp2
-  | LessExp (exp1, exp2) -> print_binary spaces "LessThan" exp1 exp2
-  | LessOrEqualExp (exp1, exp2) ->
-      print_binary spaces "LessOrEqualThan" exp1 exp2
-  | GreaterExp (exp1, exp2) -> print_binary spaces "GreaterThan" exp1 exp2
-  | GreaterOrEqualExp (exp1, exp2) ->
-      print_binary spaces "GreaterOrEqualThan" exp1 exp2
-  | EqualExp (exp1, exp2) -> print_binary spaces "Equal" exp1 exp2
-  | NotEqualExp (exp1, exp2) -> print_binary spaces "NotEqual" exp1 exp2
-  | OrExp (exp1, exp2) -> print_binary spaces "LogicalOr" exp1 exp2
-  | AndExp (exp1, exp2) -> print_binary spaces "LogicalAnd" exp1 exp2
-  | AssignExp (a, st) ->
-      String.make spaces ' ' ^ "Assignment of :\n"
-      ^ print_expression (spaces + 1) a
-      ^ print_expression (spaces + 1) st
-  | ConditionExp (exp1, exp2, exp3) ->
-      String.make spaces ' ' ^ "ConditionExp:\n"
-      ^ print_expression (spaces + 1) exp1
-      ^ print_expression (spaces + 1) exp2
-      ^ print_expression (spaces + 1) exp3
-  | FunctionCallExp (fname, exps) ->
-      String.make spaces ' ' ^ "Function call -> " ^ fname ^ "\n"
-      ^ List.fold_left
-          (fun acc exp -> acc ^ print_expression (spaces + 1) exp)
-          "" exps
-
-(* Pretty prints an AST. *)
-and print_ast (ast : program_t) : string =
-  let print_expression_option spaces exp_opt =
-    match exp_opt with None -> "" | Some exp -> print_expression spaces exp
-  in
-  let rec print_statement spaces st =
-    match st with
-    | ReturnStatement exp ->
-        String.make spaces ' ' ^ "Return Statement: \n"
-        ^ print_expression (spaces + 1) exp
-    | ExpressionStatement (Some exp) ->
-        String.make spaces ' ' ^ "Expression Statement: \n"
-        ^ print_expression (spaces + 1) exp
-    | ExpressionStatement None ->
-        String.make spaces ' ' ^ "Empty expression statement"
-    | ConditionalStatement (exp, st1, Some st2) ->
-        String.make spaces ' ' ^ "ConditionStatement:\n"
-        ^ print_expression (spaces + 1) exp
-        ^ print_statement (spaces + 1) st1
-        ^ print_statement (spaces + 1) st2
-    | CompoundStatement items ->
-        String.make spaces ' ' ^ "CompountStatement:\n"
-        ^ List.fold_left
-            (fun acc st -> acc ^ print_block_item (spaces + 1) st)
-            "" items
-    | ConditionalStatement (exp, st1, None) ->
-        String.make spaces ' ' ^ "ConditionStatement:\n"
-        ^ print_expression (spaces + 1) exp
-        ^ print_statement (spaces + 1) st1
-    | ForStatement (exp1_opt, exp2, exp3_opt, st) ->
-        String.make spaces ' ' ^ "ForStatement:\n"
-        ^ print_expression_option (spaces + 1) exp1_opt
-        ^ print_expression (spaces + 1) exp2
-        ^ print_expression_option (spaces + 1) exp3_opt
-        ^ print_statement (spaces + 1) st
-    | ForDeclStatement (decl, exp2, exp3_opt, st) ->
-        String.make spaces ' ' ^ "ForDeclareStatement:\n"
-        ^ print_declare (spaces + 1) decl
-        ^ print_expression (spaces + 1) exp2
-        ^ print_expression_option (spaces + 1) exp3_opt
-        ^ print_statement (spaces + 1) st
-    | DoStatement (st, exp) ->
-        String.make spaces ' ' ^ "DoStatementt:\n"
-        ^ print_expression (spaces + 1) exp
-        ^ print_statement (spaces + 1) st
-    | WhileStatement (exp, st) ->
-        String.make spaces ' ' ^ "WhileStatementt:\n"
-        ^ print_expression (spaces + 1) exp
-        ^ print_statement (spaces + 1) st
-    | ContinueStatement -> String.make spaces ' ' ^ "Continue\n"
-    | BreakStatement -> String.make spaces ' ' ^ "Break\n"
-  and print_declare spaces st =
-    match st with
-    | DeclareStatement (t, a, None) ->
-        String.make spaces ' ' ^ "Declare Statement of " ^ a ^ " type: "
-        ^ print_data_type t ^ "\n"
-    | DeclareStatement (t, a, Some exp) ->
-        String.make spaces ' ' ^ "Declare and Init Statement of " ^ a
-        ^ " type: " ^ print_data_type t ^ "\n"
-        ^ print_expression (spaces + 1) exp
-  and print_block_item spaces item =
-    match item with
-    | StatementItem st ->
-        String.make spaces ' ' ^ "StatementItem:\n"
-        ^ print_statement (spaces + 1) st
-    | DeclareItem decl ->
-        String.make spaces ' ' ^ "DeclareItem:\n"
-        ^ print_declare (spaces + 1) decl
-  in
-  let print_params params =
-    List.fold_left (fun acc (name, dtype) -> acc ^ name ^ ",") "" params
-  in
-  let print_function spaces f =
-    let print_statements spaces sts_opt =
-      match sts_opt with
-      | None ->
-          String.make spaces ' '
-          ^ "Empty Statements (Function declaration only.)"
-      | Some statements ->
-          List.fold_left
-            (fun acc st -> acc ^ print_block_item spaces st)
-            "" statements
-    in
-    match f with
-    | IntFunction (a, params, sts) ->
-        String.make spaces ' ' ^ "Function " ^ a ^ ": , Params: "
-        ^ print_params params ^ "\n"
-        ^ print_statements (spaces + 1) sts
-  in
-  match ast with
-  | Program fns ->
-      "Program: \n"
-      ^ List.fold_left (fun acc f -> acc ^ print_function 1 f ^ "\n") "" fns
+        ^ Debug.print_token token )
 
 (* Parses a factor expression. *)
 let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
@@ -246,7 +78,7 @@ let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
   | Addition :: Addition :: r ->
       let factor, r = parse_factor r in
       (PreIncExp factor, r)
-  | Negation :: Negation:: r ->
+  | Negation :: Negation :: r ->
       let factor, r = parse_factor r in
       (PreDecExp factor, r)
   | Negation :: r ->
@@ -263,7 +95,7 @@ let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
       match left with
       | RightParentheses :: r -> (GroupedExpression exp, r)
       | _ -> fail "Expecting RightParentheses." )
-  | a :: r -> fail ("Unexpected token in parse_factor: " ^ print_token a)
+  | a :: r -> fail ("Unexpected token in parse_factor: " ^ Debug.print_token a)
 
 (* Parses a term expression. *)
 and parse_term (tokens : token_t list) : expression_t * token_t list =
@@ -369,7 +201,7 @@ and parse_conditional_expression (tokens : token_t list) :
       | Colon :: r3 ->
           let third_exp, r4 = parse_expression r3 in
           (ConditionExp (first_exp, second_exp, third_exp), r4)
-      | a :: _ -> fail ("Expecting Colon, but see " ^ print_token a)
+      | a :: _ -> fail ("Expecting Colon, but see " ^ Debug.print_token a)
       | [] -> fail "Expecting Colon, but see end of file." )
   | _ -> (first_exp, left)
 
@@ -390,7 +222,7 @@ and parse_expression (tokens : token_t list) : expression_t * token_t list =
           (AssignExp (exp, exp2), r2)
         else
           "Left operand is not assignable in parse_expression: "
-          ^ print_expression 0 exp
+          ^ Debug.print_expression 0 exp
           |> fail
       else (exp, r)
 
@@ -481,7 +313,7 @@ and parse_block_item (tokens : token_t list) : block_item_t * token_t list =
     match tokens with
     | [] -> fail "Empty statement or declare statement."
     | a :: r ->
-        if is_type_keyword a then
+        if Lexer.is_type_keyword a then
           let declare, r2 = parse_declare tokens in
           (DeclareItem declare, r2)
         else
@@ -536,7 +368,7 @@ and parse_function (tokens : token_t list) : function_t * token_t list =
         let r = consume_token LeftBrace r in
         let statements, r = parse_block_items [] r in
         (IntFunction (fname, params, Some statements), r)
-  | a :: r -> fail ("Unexpected token in parse_function: " ^ print_token a)
+  | a :: r -> fail ("Unexpected token in parse_function: " ^ Debug.print_token a)
 
 (* Parses all functions. *)
 let rec parse_functions (acc : function_t list) (tokens : token_t list) :

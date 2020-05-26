@@ -15,7 +15,8 @@ let parse_data_type (tokens : token_t list) :
             ("Already parsed an identifier, found another identifer: " ^ name)
           |> raise
     | LeftBracket :: Literal (IntLiteral a) :: RightBracket :: r ->
-        helper name_opt (ArrayType (cur_type, a)) r
+        let name_res, child_type, rest = helper name_opt cur_type r in
+        name_res, ArrayType(child_type, a), rest
     | _ -> (name_opt, cur_type, tokens)
   in
   let name_opt, cur_type, r =

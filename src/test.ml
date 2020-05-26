@@ -43,13 +43,13 @@ let typeutil_test () =
   let name, dtype, _ =
     Typeutil.parse_data_type (Lexer.parse_tokens "int a[2][3]")
   in
-  expect_data_type_eq dtype (ArrayType (ArrayType (IntType, 2), 3));
+  expect_data_type_eq dtype (ArrayType (ArrayType (IntType, 3), 2));
   expect_str_eq name "a";
 
   let name, dtype, _ =
     Typeutil.parse_data_type (Lexer.parse_tokens "int *a[2][3]")
   in
-  expect_data_type_eq dtype (ArrayType (ArrayType (PointerType IntType, 2), 3));
+  expect_data_type_eq dtype (ArrayType (ArrayType (PointerType IntType, 3), 2));
   expect_str_eq name "a";
 
   let name, dtype, _ =

@@ -170,6 +170,7 @@ run_test "test/char_array_initialization.c" 0 "helloworld!"
 
 # Complex problems.
 run_test "coding_problems/8_queen.c" 92
+run_test "coding_problems/trading_stocks.c" 13
 }
 
 if [ $MODE_ALL_TEST = 1 ]; then

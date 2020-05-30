@@ -25,6 +25,7 @@ let parse_data_type (tokens : token_t list) :
     | CharKeyword :: r -> helper None CharType r
     | DoubleKeyword :: r -> helper None DoubleType r
     | FloatKeyword :: r -> helper None FloatType r
+    | StructKeyword :: Identifier (a) :: r -> helper None (StructType(a,[])) r
     | x :: r ->
         ParseTypeError ("Illegal token in parse type: " ^ Debug.print_token x) |> raise
     | [] -> 

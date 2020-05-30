@@ -14,6 +14,8 @@ type var_map_t = {
    * this references a global data, offset should be ignored. *)
   vars : (int * data_type_t * string option) VarMap.t;
   cur_scope_vars : (int * data_type_t * string option) VarMap.t;
+  (* Global type definitions such as struct *)
+  type_defs : (data_type_t) VarMap.t;
   (* index is the current offset of (%esp - %ebp), this is used to statically associate a new
    * variable to its address, which is offset to frame base %ebp. *)
   index : int;
@@ -27,6 +29,7 @@ let default_var_map =
   {
     vars = VarMap.empty;
     cur_scope_vars = VarMap.empty;
+    type_defs = VarMap.empty;
     (* Start the offset as 0, since %ebp = %esp. *)
     index = 0;
     break_label = "";
@@ -711,7 +714,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       (sts : block_item_t list) : var_map_t =
     List.fold_left (generate_block_item ctx) var_map sts
 
-  let generate_function (ctx : context_t) (f : function_t) : var_map_t =
+  let generate_global (ctx : context_t) (g : global_item_t) : var_map_t =
     (* Generates the var_map with the references to the function arguments. *)
     let rec generate_f_var_map ctx var_map fname
         (params : (string * data_type_t) list) index : var_map_t =
@@ -757,6 +760,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       {
         vars = VarMap.empty;
         cur_scope_vars = VarMap.empty;
+        type_defs = VarMap.empty;
+        (* For struct definitions *)
         (* Start the offset as 0, since %ebp = %esp. *)
         index = 0;
         break_label = "";
@@ -768,8 +773,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     let output = ctx.output in
     let gen_command a b = CG.gen_command a b |> output in
 
-    match f with
-    | IntFunction (fname, params, items_opt) -> (
+    match g with
+    | GlobalFunction (IntFunction (fname, params, items_opt)) -> (
         match items_opt with
         | None -> var_map
         | Some items ->
@@ -836,6 +841,17 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             output "    ret\n";
 
             res )
+    | GlobalDef data_type -> (
+        match data_type with
+        | StructType (a, _) ->
+            {
+              var_map with
+              type_defs = VarMap.add a data_type var_map.type_defs;
+            }
+        | a ->
+            "Global type definitions can only be struct definitions, saw "
+            ^ Debug.print_data_type a
+            |> fail )
 
   (* Generates the assembly code as a string given the ast in Parser.program_t type. *)
   let generate_assembly (ast : program_t) : string =
@@ -853,17 +869,17 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     in
     ctx.output ".globl _main\n";
     match ast with
-    | Program fns ->
+    | Program globals ->
         let accumulated_var_map =
           List.fold_left
             (fun var_map f ->
-              let res_var_map = generate_function ctx f in
+              let res_var_map = generate_global ctx f in
               {
                 res_var_map with
                 static_data =
                   List.append var_map.static_data res_var_map.static_data;
               })
-            default_var_map fns
+            default_var_map globals
         in
         ctx.output (CG.gen_data_section accumulated_var_map.static_data);
         Buffer.contents buf

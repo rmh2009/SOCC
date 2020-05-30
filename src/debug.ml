@@ -1,6 +1,8 @@
 open Tokens
 open Type
 
+exception DebugError of string
+
 let print_token (token : token_t) : string =
   let print_literal l =
     match l with
@@ -51,6 +53,9 @@ let print_token (token : token_t) : string =
   | CharKeyword -> "Char"
   | FloatKeyword -> "Float"
   | DoubleKeyword -> "Double"
+  | StructKeyword -> "Struct"
+  | Dot -> "Dot."
+  | Arrow -> "Arrow->"
 
 let rec print_data_type (t : data_type_t) : string =
   match t with
@@ -63,6 +68,13 @@ let rec print_data_type (t : data_type_t) : string =
   | PointerType t -> "Pointer of " ^ print_data_type t
   | UnknownType -> "UnknownType"
   | VoidType -> "VoidType"
+  | StructType (name, members) ->
+      "Struct: " ^ name ^ ": {"
+      ^ List.fold_left
+          (fun acc (name, dtype) ->
+            acc ^ name ^ ": " ^ print_data_type dtype ^ "; ")
+          "" members
+      ^ "} "
 
 let rec print_expression spaces exp =
   let print_space str = String.make spaces ' ' ^ str in
@@ -76,6 +88,10 @@ let rec print_expression spaces exp =
   | VarExp a -> String.make spaces ' ' ^ "Ref of " ^ a ^ "\n"
   | ArrayIndexExp (arr, index) ->
       print_space "ArrayIndex:\n" ^ print_exp arr ^ print_exp index
+  | StructMemberExp (exp, member) ->
+      print_space "StructMember \n" ^ print_exp exp ^ print_space (" ." ^ member) ^ "\n"
+  | ArrowStructMemberExp (exp, member) ->
+      print_space "ArrowStructMember \n" ^ print_exp exp ^ print_space (" ->" ^ member) ^ "\n"
   | DereferenceExp exp -> print_space "PointerDereference:\n" ^ print_exp exp
   | AddressOfExp exp -> print_space "AddressOf:\n" ^ print_exp exp
   | ConstantIntExp n ->
@@ -200,7 +216,12 @@ and print_ast (ast : program_t) : string =
         ^ print_params params ^ "\n"
         ^ print_statements (spaces + 1) sts
   in
+  let print_global spaces g =
+    match g with
+    | GlobalFunction f -> print_function spaces f
+    | GlobalDef data_type -> print_data_type data_type
+  in
   match ast with
   | Program fns ->
       "Program: \n"
-      ^ List.fold_left (fun acc f -> acc ^ print_function 1 f ^ "\n") "" fns
+      ^ List.fold_left (fun acc f -> acc ^ print_global 1 f ^ "\n") "" fns

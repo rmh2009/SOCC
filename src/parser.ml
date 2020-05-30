@@ -4,9 +4,12 @@ open Typeutil
 
 let is_assignable (exp : expression_t) : bool =
   match exp with
-  | VarExp _ -> true
-  | ArrayIndexExp (_, _) -> true
-  | DereferenceExp exp -> true
+  | VarExp _
+  | ArrayIndexExp (_, _)
+  | DereferenceExp _
+  | StructMemberExp (_, _)
+  | ArrowStructMemberExp (_, _) ->
+      true
   | _ -> false
 
 exception ParserError of string
@@ -22,8 +25,8 @@ let consume_token (token : token_t) (tokens : token_t list) : token_t list =
       if hd = token then tl
       else
         fail
-          ( "Failed to consume token: " ^ Debug.print_token token ^ ", saw token: "
-          ^ Debug.print_token hd )
+          ( "Failed to consume token: " ^ Debug.print_token token
+          ^ ", saw token: " ^ Debug.print_token hd )
   | [] ->
       fail
         ( "No tokens left in consuming tokens, expecting token: "
@@ -43,15 +46,18 @@ let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
         let exp, r = parse_expression a in
         parse_call_params (exp :: acc) r
   in
-  (* Parses array index expressions, such as 'arr[0]' or 'arr[0][i+3]',
-   * assuming we already proccessed LeftBracket. *)
-  let rec parse_array_index_exp exp tokens =
-    let index, r = parse_expression tokens in
-    let r = consume_token RightBracket r in
-    if peek r = LeftBracket then
-      let r = consume_token LeftBracket r in
-      parse_array_index_exp (ArrayIndexExp (exp, index)) r
-    else (ArrayIndexExp (exp, index), r)
+  (* Parses chained variable access such as a.b[10]->c.e *)
+  let rec parse_variable_access_exp parent tokens =
+    match tokens with
+    | LeftBracket :: r ->
+        let index, r = parse_expression r in
+        let r = consume_token RightBracket r in
+        parse_variable_access_exp (ArrayIndexExp (parent, index)) r
+    | Dot :: Identifier child :: r ->
+        parse_variable_access_exp (StructMemberExp (parent, child)) r
+    | Arrow :: Identifier child :: r ->
+        parse_variable_access_exp (ArrowStructMemberExp (parent, child)) r
+    | _ -> (parent, tokens)
   in
 
   match tokens with
@@ -67,7 +73,8 @@ let rec parse_factor (tokens : token_t list) : expression_t * token_t list =
       | LeftParentheses :: r2 ->
           let params, r3 = parse_call_params [] r2 in
           (FunctionCallExp (a, params), r3)
-      | LeftBracket :: r2 -> parse_array_index_exp (VarExp a) r2
+      | Dot :: _ | Arrow :: _ | LeftBracket :: _ ->
+          parse_variable_access_exp (VarExp a) r
       | Addition :: Addition :: r2 -> (PostIncExp (VarExp a), r2)
       | Negation :: Negation :: r2 -> (PostDecExp (VarExp a), r2)
       | r2 -> (VarExp a, r2) )
@@ -210,23 +217,17 @@ and parse_conditional_expression (tokens : token_t list) :
 (* Parses any one expression. *)
 and parse_expression (tokens : token_t list) : expression_t * token_t list =
   (* Parses an expression. *)
-  match tokens with
-  | Identifier a :: Assignment :: r ->
-      let exp, left = parse_expression r in
-      (AssignExp (VarExp a, exp), left)
-  (* We don't know directly if this is assigning to a array variable or not. so we need to check the left operand is assignable. *)
-  | l ->
-      let exp, r = parse_conditional_expression l in
-      if peek r = Assignment then
-        if is_assignable exp then
-          let r = consume_token Assignment r in
-          let exp2, r2 = parse_expression r in
-          (AssignExp (exp, exp2), r2)
-        else
-          "Left operand is not assignable in parse_expression: "
-          ^ Debug.print_expression 0 exp
-          |> fail
-      else (exp, r)
+  let exp, r = parse_conditional_expression tokens in
+  if peek r = Assignment then
+    if is_assignable exp then
+      let r = consume_token Assignment r in
+      let exp2, r2 = parse_expression r in
+      (AssignExp (exp, exp2), r2)
+    else
+      "Left operand is not assignable in parse_expression: "
+      ^ Debug.print_expression 0 exp
+      |> fail
+  else (exp, r)
 
 (* Returns expression Option. If the next token is Semi-colon will return None. *)
 let parse_expression_opt (tokens : token_t list) :
@@ -372,22 +373,50 @@ and parse_function (tokens : token_t list) : function_t * token_t list =
         (IntFunction (fname, params, Some statements), r)
   | a :: r -> fail ("Unexpected token in parse_function: " ^ Debug.print_token a)
 
+let parse_struct_definition (tokens : token_t list) : data_type_t * token_t list
+    =
+  let rec parse_declares_helper acc tokens : declare_t list * token_t list =
+    if peek tokens != RightBrace then
+      let declare, r = parse_declare tokens in
+      let r = consume_token Semicolon r in
+      parse_declares_helper (declare :: acc) r
+    else (List.rev acc, tokens)
+  in
+  match tokens with
+  | StructKeyword :: Identifier id :: LeftBrace :: r ->
+      let declares, left = parse_declares_helper [] r in
+      let res =
+        StructType
+          ( id,
+            List.map
+              (fun (DeclareStatement (t, name, _) : declare_t) -> (name, t))
+              declares )
+      in
+      let left = consume_token RightBrace left in
+      let left = consume_token Semicolon left in
+      (res, left)
+  | _ -> fail "Illegal struct definition."
+
 (* Parses all functions. *)
-let rec parse_functions (acc : function_t list) (tokens : token_t list) :
-    function_t list * token_t list =
+let rec parse_globals (acc : global_item_t list) (tokens : token_t list) :
+    global_item_t list * token_t list =
   match tokens with
   | [] -> (List.rev acc, tokens)
-  | a ->
-      let f, r = parse_function a in
-      parse_functions (f :: acc) r
+  | IntKeyword :: Identifier _ :: LeftParentheses :: r ->
+      let f, r = parse_function tokens in
+      parse_globals (GlobalFunction f :: acc) r
+  | StructKeyword :: r ->
+      let struct_type, r = parse_struct_definition tokens in
+      parse_globals (GlobalDef struct_type :: acc) r
+  | _ -> fail "Invalid tokens in parse_globals."
 
 (* Parses tokens to get a program, returns the program and possibly remaining tokens. *)
 let parse_program (tokens : token_t list) : program_t * token_t list =
   match tokens with
   | [] -> fail "Empty program."
   | a ->
-      let functions, r = parse_functions [] a in
-      (Program functions, r)
+      let global_items, r = parse_globals [] a in
+      (Program global_items, r)
 
 (* Parses tokens to get the AST in program_t. *)
 let get_ast (tokens : token_t list) : program_t =

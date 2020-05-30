@@ -5,6 +5,7 @@ type data_type_t =
   | CharType
   | ArrayType of data_type_t * int
   | PointerType of data_type_t
+  | StructType of string * (string * data_type_t) list
   | UnknownType
   | VoidType
 
@@ -23,6 +24,8 @@ type expression_t =
   | PostDecExp of expression_t
   | VarExp of string
   | ArrayIndexExp of expression_t * expression_t (* first expression_t must be of type array, second is index *)
+  | StructMemberExp of expression_t * string (* first exp should be struct, second is member name *)
+  | ArrowStructMemberExp of expression_t * string (* first exp should be pointer to struct, second is member name *)
   | DereferenceExp of expression_t
   | AddressOfExp of expression_t
   | GroupedExpression of expression_t
@@ -66,7 +69,11 @@ and block_item_t = StatementItem of statement_t | DeclareItem of declare_t
 type function_t =
   | IntFunction of string * (string * data_type_t) list * block_item_t list option
 
-type program_t = Program of function_t list
+type global_item_t =
+  | GlobalFunction of function_t
+  | GlobalDef of data_type_t
+
+type program_t = Program of global_item_t list
 
 type static_data_t = DataInt of int | DataString of string
 

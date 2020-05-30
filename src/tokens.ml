@@ -44,7 +44,9 @@ type token_t =
   | DoKeyword
   | BreakKeyword
   | ContinueKeyword
+  | StructKeyword
   | Comma
   | Address
-
+  | Dot
+  | Arrow
 

@@ -1,11 +1,10 @@
 open Tokens
 
 let is_type_keyword token : bool =
-  if token = IntKeyword then true
-  else if token = DoubleKeyword then true
-  else if token = CharKeyword then true
-  else if token = FloatKeyword then true
-  else false
+  match token with
+  | IntKeyword | DoubleKeyword | CharKeyword | FloatKeyword | StructKeyword ->
+      true
+  | _ -> false
 
 let read_file_content (file_name : string) : string =
   let file = open_in file_name in
@@ -55,6 +54,7 @@ let parse_tokens (content : string) : token_t list =
     else if word = "do" then (DoKeyword, loc)
     else if word = "break" then (BreakKeyword, loc)
     else if word = "continue" then (ContinueKeyword, loc)
+    else if word = "struct" then (StructKeyword, loc)
     else if is_alpha word.[0] then (Identifier word, loc)
     else (Literal (IntLiteral (int_of_string word)), loc)
   in
@@ -88,7 +88,10 @@ let parse_tokens (content : string) : token_t list =
       | '[' -> (LeftBracket, i + 1)
       | ']' -> (RightBracket, i + 1)
       | ';' -> (Semicolon, i + 1)
-      | '-' -> (Negation, i + 1)
+      | '.' -> (Dot, i + 1)
+      | '-' -> 
+          if content.[i+1] = '>' then (Arrow, i + 2)
+          else (Negation, i + 1)
       | ',' -> (Comma, i + 1)
       | '!' ->
           if content.[i + 1] = '=' then (NotEqual, i + 2)

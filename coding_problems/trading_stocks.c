@@ -44,7 +44,7 @@ int main() {
   }
 
   // Prints the temporary array.
-  char format[10] = "%d,";
+  char format[11] = "%d,";
   for (int i = 0; i < 7; ++i ){
     for (int j = 0; j < 7; ++j) {
       printf(format, profit[i][j]);

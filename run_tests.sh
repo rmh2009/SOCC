@@ -42,21 +42,31 @@ fi
 
 OCAML_DEPS="../src/tokens.ml  ../src/type.ml ../src/debug.ml ../src/typeutil.ml ../src/lexer.ml ../src/parser.ml ../src/util.ml ../src/codegen_util.ml ../src/codegen.ml "
 
-# Compile the compiler, then use it to compile the test.c file into assembly.s.
-compile_code() {
-  cc_file=$1
-  ocaml_main_file=$2
-  echo "Testing file $cc_file..."
-  echo $PWD
-  cp ../$cc_file ./test.cc
-  if [ $? != 0 ]; then
-    echo "Failed to copy file test/$cc_file"
-    exit 1
+# Compile the compiler
+compile_compiler() {
+
+  if [ $IS64BIT = 1 ]; then
+    ocaml_main_file="main64.ml"
+  else
+    ocaml_main_file="main.ml"
   fi
-    ocamlopt -o cc_ocaml $OCAML_DEPS ../src/"$ocaml_main_file"
+
+  echo $PWD
+  ocamlopt -o cc_ocaml $OCAML_DEPS ../src/"$ocaml_main_file"
+
   ret=$?
   if [[ $ret -ne 0 ]]; then
     echo "Compiling failed."
+    exit 1
+  fi
+}
+# Use the compiler to compile the ./test.cc file into assembly.s.
+compile_code() {
+  cc_file=$1
+  echo "Testing file $cc_file..."
+  cp ../$cc_file ./test.cc
+  if [ $? != 0 ]; then
+    echo "Failed to copy file test/$cc_file"
     exit 1
   fi
   ./cc_ocaml
@@ -78,17 +88,19 @@ run_code() {
   ./out > std_output.txt
 }
 
+# test statistics.
 failed_tests=""
+testcount=0
+failedcount=0
 
 run_test()  {
   cc_file=$1
   result=$2
   expected_output=$3
-  if [ $IS64BIT = 1 ]; then
-    compile_code $cc_file "main64.ml"
-  else
-    compile_code $cc_file "main.ml"
-  fi
+
+  testcount=$(($testcount + 1))
+
+  compile_code $cc_file 
 
   if [ $? != 0 ]; then
     echo "Compiling failed!"
@@ -100,6 +112,7 @@ run_test()  {
   if [ $actual_result != $result ]; then
     echo "*********** ( Failed testing $cc_file, expecting $result, actual $actual_result ) "
     failed_tests="$failed_tests ( Failed testing $cc_file, expecting $result, actual $actual_result ) "
+    failedcount=$(($failedcount + 1))
     return 1
   fi
   if [ -z $expected_output ]; then
@@ -108,72 +121,85 @@ run_test()  {
     if [ "$expected_output" != "$std_output" ]; then
       echo "*********** ( Failed testing $cc_file, expecting std output $expected_output, actual $std_output ) "
       failed_tests="$failed_tests ( Failed testing $cc_file, expecting std output $expected_output, actual $std_output ) "
+      failedcount=$(($failedcount + 1))
     fi
   fi
   echo "************ Test passed for $cc_file"
 }
 
 run_all_tests() {
-run_test "test/binary_operators_expect_0.c"  0
-run_test "test/binary_operators_expect_1.c"  1 
-run_test "test/binary_operators_expect_9.c"  9 
-run_test "test/division_test_expect_3.c"  3 
-run_test "test/multiply_test_expect_15.c"  15 
 
-run_test "test/test_inc_expect2.c" 2
-run_test "test/test_inc2_expect1.c" 1
-run_test "test/test_dec_expect1.c" 1
-run_test "test/test_dec2_expect2.c" 2
+  run_test "test/binary_operators_expect_0.c"  0
+  run_test "test/binary_operators_expect_1.c"  1 
+  run_test "test/binary_operators_expect_9.c"  9 
+  run_test "test/division_test_expect_3.c"  3 
+  run_test "test/multiply_test_expect_15.c"  15 
 
-run_test "test/compound_statement2_expect_1.c"  1 
-run_test "test/compound_statement3_expect_3.c"  3
-run_test "test/compound_statement4_expect_3.c" 3
-run_test "test/compound_statement5_expect_2.c" 2
-run_test "test/compound_statement_expect_4.c" 4
-run_test "test/conditional_expression_expect_3.c" 3
-run_test "test/conditional_statement2_expect_2.c" 2
-run_test "test/conditional_statement_expect_2.c" 2
-run_test "test/local_variable_expect_24.c" 24
-run_test "test/unary_operator_expect_0.c" 0
-run_test "test/for_loop_expect_10.c" 10
-run_test "test/for_loop2_expect_10.c" 10
-run_test "test/for_loop3_expect_10.c" 10
-run_test "test/do_loop_expect_10.c" 10
-run_test "test/while_loop_expect_10.c" 10
-run_test "test/break_in_for_loop2_expect_15.c" 15
-run_test "test/break_in_for_loop_expect_15.c" 15
-run_test "test/break_inner_compound_expect_5.c" 5
-run_test "test/continue_in_do_loop2_expect_15.c" 15
-run_test "test/continue_in_do_loop_expect_15.c" 15
-run_test "test/continue_in_for_loop2_expect_15.c" 15
-run_test "test/continue_in_for_loop_expect_15.c" 15
-run_test "test/continue_inner_loop_expect_15.c" 15
+  run_test "test/test_inc_expect2.c" 2
+  run_test "test/test_inc2_expect1.c" 1
+  run_test "test/test_dec_expect1.c" 1
+  run_test "test/test_dec2_expect2.c" 2
 
-run_test "test/for_nested_for_loops_expect_60.c" 60
-run_test "test/function_call_test1_expect_19.c" 19
-run_test "test/function_call_test2_expect_21.c" 21
-run_test "test/function_call_pointer_expect_6.c" 6
-run_test "test/function_call_test_fibonaci_expect_5.c" 5
-run_test "test/print_hello_world.c" 0 "Hello, World!"
+  run_test "test/compound_statement2_expect_1.c"  1 
+  run_test "test/compound_statement3_expect_3.c"  3
+  run_test "test/compound_statement4_expect_3.c" 3
+  run_test "test/compound_statement5_expect_2.c" 2
+  run_test "test/compound_statement_expect_4.c" 4
+  run_test "test/conditional_expression_expect_3.c" 3
+  run_test "test/conditional_statement2_expect_2.c" 2
+  run_test "test/conditional_statement_expect_2.c" 2
+  run_test "test/local_variable_expect_24.c" 24
+  run_test "test/unary_operator_expect_0.c" 0
+  run_test "test/for_loop_expect_10.c" 10
+  run_test "test/for_loop2_expect_10.c" 10
+  run_test "test/for_loop3_expect_10.c" 10
+  run_test "test/do_loop_expect_10.c" 10
+  run_test "test/while_loop_expect_10.c" 10
+  run_test "test/break_in_for_loop2_expect_15.c" 15
+  run_test "test/break_in_for_loop_expect_15.c" 15
+  run_test "test/break_inner_compound_expect_5.c" 5
+  run_test "test/continue_in_do_loop2_expect_15.c" 15
+  run_test "test/continue_in_do_loop_expect_15.c" 15
+  run_test "test/continue_in_for_loop2_expect_15.c" 15
+  run_test "test/continue_in_for_loop_expect_15.c" 15
+  run_test "test/continue_inner_loop_expect_15.c" 15
 
-run_test "test/array_test1_expect_4.c" 4
-run_test "test/array_2d_test_expect_4.c" 4
-run_test "test/array_2d_test_expect2_18.c" 18
+  run_test "test/for_nested_for_loops_expect_60.c" 60
+  run_test "test/function_call_test1_expect_19.c" 19
+  run_test "test/function_call_test2_expect_21.c" 21
+  run_test "test/function_call_pointer_expect_6.c" 6
+  run_test "test/function_call_test_fibonaci_expect_5.c" 5
+  run_test "test/function_two_args_expect_2.c" 2
 
-run_test "test/pointer_test1_expect_3.c" 3
-run_test "test/pointer_test2_expect_10.c" 10
-run_test "test/pointer_test3_address_of_array_element_expect3.c" 3
-run_test "test/pointer_test_address_of_address_increasing_expect_4.c" 4
+  run_test "test/print_hello_world.c" 0 "Hello, World!"
 
-run_test "test/char_operations_and_print_test.c" 0 "abcdefghij"
-run_test "test/char_array_initialization.c" 0 "helloworld!"
+  run_test "test/array_test1_expect_4.c" 4
+  run_test "test/array_2d_test_expect_4.c" 4
+  run_test "test/array_2d_test_expect2_18.c" 18
+  run_test "test/array_test_pass_array_to_function_expect_11.c" 11
 
-run_test "test/test_struct_1_expect_10.c" 10
-run_test "test/test_struct_2_expect_5.c" 5
+  run_test "test/pointer_test1_expect_3.c" 3
+  run_test "test/pointer_test2_expect_10.c" 10
+  run_test "test/pointer_test3_address_of_array_element_expect3.c" 3
+  run_test "test/pointer_test_address_of_address_increasing_expect_4.c" 4
 
-# Complex problems.
-run_test "coding_problems/8_queen.c" 92
-run_test "coding_problems/trading_stocks.c" 13
+  run_test "test/char_operations_and_print_test.c" 0 "abcdefghij"
+  run_test "test/char_array_initialization.c" 0 "helloworld!"
+
+  run_test "test/test_struct_1_expect_10.c" 10
+  run_test "test/test_struct_2_expect_5.c" 5
+
+  # Complex problems.
+  run_test "coding_problems/8_queen.c" 92
+  run_test "coding_problems/trading_stocks.c" 13
+
+  passedcount=$(($testcount - $failedcount))
+  echo "Passed tests: $passedcount/$testcount"
+  if [ -z $failed_tests ]; then
+    echo "All tests passed!"
+  else
+    echo "Failed tests: $failed_tests"
+  fi
 }
 
 if [ $MODE_ALL_TEST = 1 ]; then
@@ -186,13 +212,10 @@ if [ $MODE_ALL_TEST = 1 ]; then
   echo "######## Running all unit tests, is_64_bit=$IS64BIT"
   cd src
 
+  compile_compiler
   run_all_tests
 
-  if [ -z $failed_tests ]; then
-    echo "All tests passed!"
-  else
-    echo "Failed tests: $failed_tests"
-  fi
+
   exit 0
 fi
 
@@ -205,6 +228,8 @@ if [ $MODE_ONE_TEST = 1 ]; then
   echo "######## Running one test: $2 expecting $3, is_64_bit=$IS64BIT"
   cd src
   echo ""
+
+  compile_compiler
   run_test $2 $3
   exit 0
 fi

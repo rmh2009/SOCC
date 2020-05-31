@@ -90,6 +90,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
    * alignment, pushing parameters, remove padding afterwards, etc.*)
   let rec generate_f_call ctx var_map fname exps =
     add_function_call_padding ctx (List.length exps);
+    let exps_reversed = List.rev exps in
     let rec helper var_map fname exps num_args =
       match exps with
       | [] ->
@@ -102,7 +103,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
           ctx.output "    push   %eax\n";
           helper var_map fname r num_args
     in
-    helper var_map fname exps (List.length exps)
+    helper var_map fname exps_reversed (List.length exps)
 
   (* Generate code for calling a function for 64 assmebly. This includes adding
    * padding for alignment, pushing parameters, remove padding afterwards, etc.*)
@@ -477,7 +478,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
         output "# array assign addr above\n";
         match t with
-        | ArrayType (element_type, size) ->
+        | ArrayType (element_type, size) | PointerType (ArrayType(element_type, size)) ->
             if is_type_array element_type then
               fail "Only 1-D array is assignable."
             else
@@ -762,7 +763,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
           generate_f_var_map ctx
             {
               var_map with
-              vars = VarMap.add name (index, dtype, None) var_map.vars;
+              vars = VarMap.add name (index, decay dtype, None) var_map.vars;
               break_label = "";
               continue_label = "";
             }

@@ -22,11 +22,12 @@ Implemented features:
  - A simple type checking system. (see note1)
  - Support for pointer. (see note2)
  - Supports both 32 bit and 64 bit x86 assembly (see note4).
- - Support for char and char array initialization.
+ - Support for char and char array initialization. (see note5)
+ - Support for struct. (see note6)
 
 Some features missing:
- - Support for struct.
  - Support for float/double.
+ - Macros
  - And more...
 
 Initially I read Nora's article (see the reference) on how to write a C compiler, but at the time the article stopped at implementing function calls (As of May 2020).
@@ -232,6 +233,9 @@ f:
 
 memcpy accepts 3 parameters, so we need to push another 4 byte to align the stack.
 
+# Note 6
+
+(TBD) Implementing support for struct.
 
 # Compiling the assembly
 

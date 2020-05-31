@@ -9,22 +9,6 @@ exception CodeGenError of string
 
 let fail msg = raise (CodeGenError msg)
 
-type var_map_t = {
-  (* (offset, data_type_t, global_data_label), if the global_data_label exists it means
-   * this references a global data, offset should be ignored. *)
-  vars : (int * data_type_t * string option) VarMap.t;
-  cur_scope_vars : (int * data_type_t * string option) VarMap.t;
-  (* Global type definitions such as struct *)
-  type_defs : (data_type_t) VarMap.t;
-  (* index is the current offset of (%esp - %ebp), this is used to statically associate a new
-   * variable to its address, which is offset to frame base %ebp. *)
-  index : int;
-  break_label : string;
-  continue_label : string;
-  function_return_label : string;
-  static_data : (string * static_data_t) list; (* label and data list *)
-}
-
 let default_var_map =
   {
     vars = VarMap.empty;
@@ -174,6 +158,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             | IntType -> gen_command (Mov (Disp (offset, BP), Reg AX)) IntType
             | ArrayType (_, _) ->
                 gen_command (Lea (Disp (offset, BP), Reg AX)) pvoid
+            | StructType (_, _) ->
+                gen_command (Lea (Disp (offset, BP), Reg AX)) pvoid
             | PointerType _ ->
                 gen_command (Mov (Disp (offset, BP), Reg AX)) pvoid
             | CharType ->
@@ -238,18 +224,20 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         match t with
         | ArrayType (child_type, _) | PointerType (ArrayType (child_type, _)) ->
             let off, _, var_map =
-              allocate_stack ctx var_map (CG.get_data_size pvoid)
+              allocate_stack ctx var_map (CG.get_data_size var_map pvoid)
             in
             gen_command (Mov (Reg AX, Disp (off, BP))) pvoid;
             generate_expression ctx var_map exp2 |> ignore;
             gen_command (Mov (Disp (off, BP), Reg CX)) pvoid;
-            gen_command (Mul (Imm (CG.get_data_size child_type), Reg AX)) pvoid;
+            gen_command
+              (Mul (Imm (CG.get_data_size var_map child_type), Reg AX))
+              pvoid;
             gen_command (Add (Reg CX, Reg AX)) pvoid;
             gen_command (Mov (Reg AX, Reg DX)) pvoid;
             (* gen_command
-               (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg DX))
+               (Lea (Index (0, CX, AX, CG.get_data_size var_map child_type), Reg DX))
                pvoid; *)
-            if not (is_type_array child_type) then (
+            if not (should_array_element_be_address child_type) then (
               gen_command (Xor (Reg AX, Reg AX)) pvoid;
               gen_command (Mov (RegV DX, Reg AX)) child_type )
             else gen_command (Mov (Reg DX, Reg AX)) pvoid;
@@ -259,6 +247,26 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               ( "Target is not array type: "
               ^ Debug.print_expression 0 exp1
               ^ ", actual type: " ^ Debug.print_data_type t ) )
+    | StructMemberExp (exp, member) -> (
+        let t = generate_expression ctx var_map exp in
+        match t with
+        | StructType (name, _) -> (
+            let struct_info = VarMap.find name var_map.type_defs in
+            let _, dtype, offset = VarMap.find member struct_info.members in
+            match dtype with
+            | ArrayType (_, _) | StructType (_, _) ->
+                gen_command (Lea (Disp (offset, AX), Reg AX)) pvoid;
+                dtype
+            | _ ->
+                gen_command (Mov (Disp (offset, AX), Reg AX)) dtype;
+                dtype )
+        | _ ->
+            "Expecting struct type in StructMemberExp, actual type: "
+            ^ Debug.print_data_type t
+            |> fail )
+
+    | ArrowStructMemberExp (_, _) ->
+        fail "Array operator -> on pointer to struct is not implemented yet!"
     | DereferenceExp exp -> (
         let t = generate_expression ctx var_map exp in
         if not (is_type_pointer t) then
@@ -282,15 +290,17 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         match t with
         | ArrayType (child_type, size) ->
             let off, _, var_map =
-              allocate_stack ctx var_map (CG.get_data_size pvoid)
+              allocate_stack ctx var_map (CG.get_data_size var_map pvoid)
             in
             gen_command (Mov (Reg AX, Disp (off, BP))) pvoid;
             generate_expression ctx var_map exp2 |> ignore;
             gen_command (Mov (Disp (off, BP), Reg CX)) pvoid;
-            gen_command (Mul (Imm (CG.get_data_size child_type), Reg AX)) pvoid;
+            gen_command
+              (Mul (Imm (CG.get_data_size var_map child_type), Reg AX))
+              pvoid;
             gen_command (Add (Reg CX, Reg AX)) pvoid;
             (* gen_command
-               (Lea (Index (0, CX, AX, CG.get_data_size child_type), Reg AX))
+               (Lea (Index (0, CX, AX, CG.get_data_size var_map child_type), Reg AX))
                pvoid; *)
             PointerType child_type
         | _ -> fail "Expecting an array type in ArrayIndexExp." )
@@ -329,38 +339,40 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     | AdditionExp (exp1, exp2) ->
         let t1 = generate_expression ctx var_map exp1 in
         let off, _, var_map =
-          allocate_stack ctx var_map (CG.get_data_size t1)
+          allocate_stack ctx var_map (CG.get_data_size var_map t1)
         in
         gen_command (Mov (Reg AX, Disp (off, BP))) t1;
         let t2 = generate_expression ctx var_map exp2 in
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
         let larger_t =
-          if CG.get_data_size t1 > CG.get_data_size t2 then t1 else t2
+          if CG.get_data_size var_map t1 > CG.get_data_size var_map t2 then t1
+          else t2
         in
         gen_command (Add (Reg CX, Reg AX)) larger_t;
         t1
     | MinusExp (exp1, exp2) ->
         let t2 = generate_expression ctx var_map exp2 in
         let off, _, var_map =
-          allocate_stack ctx var_map (CG.get_data_size t2)
+          allocate_stack ctx var_map (CG.get_data_size var_map t2)
         in
         gen_command (Mov (Reg AX, Disp (off, BP))) t2;
         let t1 = generate_expression ctx var_map exp1 in
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
         let larger_t =
-          if CG.get_data_size t1 > CG.get_data_size t2 then t1 else t2
+          if CG.get_data_size var_map t1 > CG.get_data_size var_map t2 then t1
+          else t2
         in
         gen_command (Sub (Reg CX, Reg AX)) larger_t;
         t1
     | MultiExp (exp1, exp2) ->
         let t1 = generate_expression ctx var_map exp1 in
         let off, _, var_map =
-          allocate_stack ctx var_map (CG.get_data_size t1)
+          allocate_stack ctx var_map (CG.get_data_size var_map t1)
         in
         gen_command (Mov (Reg AX, Disp (off, BP))) t1;
         let t2 = generate_expression ctx var_map exp2 in
         gen_command (Mov (Disp (off, BP), Reg CX)) t1;
-        if CG.get_data_size t1 != CG.get_data_size t2 then
+        if CG.get_data_size var_map t1 != CG.get_data_size var_map t2 then
           fail
             ( "t1 and t2 not equal in binary operation: "
             ^ Debug.print_data_type t1 ^ ", " ^ Debug.print_data_type t2 );
@@ -369,17 +381,17 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     | DivideExp (exp1, exp2) ->
         let t2 = generate_expression ctx var_map exp2 in
         let off, _, var_map =
-          allocate_stack ctx var_map (CG.get_data_size t2)
+          allocate_stack ctx var_map (CG.get_data_size var_map t2)
         in
         gen_command (Mov (Reg AX, Disp (off, BP))) t2;
         let t1 = generate_expression ctx var_map exp1 in
-        if CG.get_data_size t1 != CG.get_data_size t2 then
+        if CG.get_data_size var_map t1 != CG.get_data_size var_map t2 then
           fail
             ( "t1 and t2 not equal in binary operation: "
             ^ Debug.print_data_type t1 ^ ", " ^ Debug.print_data_type t2 );
 
         (* need to sign extend eax to 64 bit edx:eax if t1 is 32bit, or sign extend rax to 128 bit rdx:rax if 64bit *)
-        let dsize = CG.get_data_size t1 in
+        let dsize = CG.get_data_size var_map t1 in
         if dsize = 4 then output "cdq\n"
         else if dsize = 8 then output "cqto"
         else fail "Division of unsupported data type.";
@@ -444,7 +456,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         output (cond_label ^ ":\n");
         let t3 = generate_expression ctx var_map exp3 in
         output (cond_end_label ^ ":\n");
-        if CG.get_data_size t2 != CG.get_data_size t3 then
+        if CG.get_data_size var_map t2 != CG.get_data_size var_map t3 then
           fail
             ( "t1 and t2 not equal in binary operation: "
             ^ Debug.print_data_type t2 ^ ", " ^ Debug.print_data_type t3 );
@@ -460,7 +472,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         (* TODO Remove ruplicate code with the other ArrayIndexExp code. *)
         let t = generate_expression ctx var_map exp1 in
         let offset, _, var_map =
-          allocate_stack ctx var_map (CG.get_data_size pvoid)
+          allocate_stack ctx var_map (CG.get_data_size var_map pvoid)
         in
         gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
         output "# array assign addr above\n";
@@ -472,11 +484,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               let t_index = generate_expression ctx var_map exp2 in
               gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
               gen_command
-                (Mul (Imm (CG.get_data_size element_type), Reg AX))
+                (Mul (Imm (CG.get_data_size var_map element_type), Reg AX))
                 pvoid;
               gen_command (Add (Reg CX, Reg AX)) pvoid;
               (* gen_command
-                 (Lea (Index (0, CX, AX, CG.get_data_size element_type), Reg AX))
+                 (Lea (Index (0, CX, AX, CG.get_data_size var_map element_type), Reg AX))
                  pvoid; *)
               (* Reuse the temp_loc here, since it's already popped. *)
               gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
@@ -491,7 +503,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     | AssignExp (DereferenceExp exp, exp_r) ->
         let t = generate_expression ctx var_map exp in
         let offset, _, var_map =
-          allocate_stack ctx var_map (CG.get_data_size pvoid)
+          allocate_stack ctx var_map (CG.get_data_size var_map pvoid)
         in
         gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
         let t2 = generate_expression ctx var_map exp_r in
@@ -508,6 +520,31 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
         gen_command (Mov (Reg AX, RegV CX)) t2;
         t2
+    | AssignExp (StructMemberExp (exp, member), exp_r) -> (
+        let t = generate_expression ctx var_map exp in
+        let offset, _, var_map =
+          allocate_stack ctx var_map (CG.get_data_size var_map pvoid)
+        in
+        match t with
+        | StructType (name, _) -> (
+            let struct_info = VarMap.find name var_map.type_defs in
+            let _, dtype, member_offset = VarMap.find member struct_info.members in
+            match dtype with
+            | ArrayType (_, _) | StructType (_, _) ->
+                "Struct member is not assignable!" ^ Debug.print_data_type dtype
+                |> fail
+            | _ ->
+                gen_command (Lea (Disp (member_offset, AX), Reg AX)) pvoid;
+                gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
+                let t_value = generate_expression ctx var_map exp_r in
+                (* get the address to assign to *)
+                gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
+                gen_command (Mov (Reg AX, RegV CX)) t_value;
+                t_value )
+        | _ ->
+            "Expecting struct type in StructMemberExp, actual type: "
+            ^ Debug.print_data_type t
+            |> fail )
     | AssignExp (_, _) -> fail "Left hand side is not assignable!"
 
   (* Updates the continue_label and break_label fields in the given var_map. *)
@@ -672,7 +709,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
 
         (* allocate the data block on stack. *)
         let start_offset, _, var_map =
-          allocate_stack ctx var_map (CG.get_data_size data_type)
+          allocate_stack ctx var_map (CG.get_data_size var_map data_type)
         in
 
         ( match (data_type, data_opt) with
@@ -714,7 +751,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
       (sts : block_item_t list) : var_map_t =
     List.fold_left (generate_block_item ctx) var_map sts
 
-  let generate_global (ctx : context_t) (g : global_item_t) : var_map_t =
+  let generate_global (ctx : context_t) (var_map : var_map_t)
+      (g : global_item_t) : var_map_t =
     (* Generates the var_map with the references to the function arguments. *)
     let rec generate_f_var_map ctx var_map fname
         (params : (string * data_type_t) list) index : var_map_t =
@@ -755,20 +793,6 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         | _, _ -> fail "Unexpectd case in generate_f_var_map_64_bit."
       in
       gen_fun ctx var_map params CG.fun_arg_registers_64
-    in
-    let var_map =
-      {
-        vars = VarMap.empty;
-        cur_scope_vars = VarMap.empty;
-        type_defs = VarMap.empty;
-        (* For struct definitions *)
-        (* Start the offset as 0, since %ebp = %esp. *)
-        index = 0;
-        break_label = "";
-        continue_label = "";
-        function_return_label = "";
-        static_data = [];
-      }
     in
     let output = ctx.output in
     let gen_command a b = CG.gen_command a b |> output in
@@ -813,17 +837,14 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
              * one is the return address saved by call, the other is 'push ebp', so we need to
              * take that into consideration. *)
             let pvoid = PointerType VoidType in
-            let two_additional_push = 2 * CG.get_data_size pvoid in
+            let two_additional_push = 2 * CG.get_data_size var_map pvoid in
             let total_stack_size =
-              two_additional_push + ctx_new.get_min_index ()
+              -two_additional_push + ctx_new.get_min_index () 
+            in
+            let stack_allocated = (make_aligned_number total_stack_size 16) + two_additional_push
             in
             gen_command
-              (Add
-                 ( Imm
-                     ( make_aligned_number total_stack_size 16
-                     - two_additional_push ),
-                   Reg SP ))
-              (PointerType VoidType);
+              (Add ( Imm stack_allocated, Reg SP )) (PointerType VoidType);
             output "#---------- function body    ----------\n";
             output (Buffer.contents fun_buf);
             (* Return label, for early returns. *)
@@ -831,7 +852,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
 
             output "#---------- stack deallocation --------\n";
             gen_command
-              (Add (Imm (-ctx_new.get_min_index ()), Reg SP))
+              (Add (Imm (-stack_allocated), Reg SP))
               (PointerType VoidType);
 
             (* Function epilog *)
@@ -840,13 +861,16 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             else output "    movq    %rbp, %rsp\n    pop    %rbp\n";
             output "    ret\n";
 
-            res )
+            { var_map with static_data = res.static_data } )
     | GlobalDef data_type -> (
         match data_type with
         | StructType (a, _) ->
             {
               var_map with
-              type_defs = VarMap.add a data_type var_map.type_defs;
+              type_defs =
+                VarMap.add a
+                  (CG.get_struct_info var_map data_type)
+                  var_map.type_defs;
             }
         | a ->
             "Global type definitions can only be struct definitions, saw "
@@ -871,15 +895,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     match ast with
     | Program globals ->
         let accumulated_var_map =
-          List.fold_left
-            (fun var_map f ->
-              let res_var_map = generate_global ctx f in
-              {
-                res_var_map with
-                static_data =
-                  List.append var_map.static_data res_var_map.static_data;
-              })
-            default_var_map globals
+          List.fold_left (generate_global ctx) default_var_map globals
         in
         ctx.output (CG.gen_data_section accumulated_var_map.static_data);
         Buffer.contents buf

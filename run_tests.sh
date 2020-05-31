@@ -168,6 +168,9 @@ run_test "test/pointer_test_address_of_address_increasing_expect_4.c" 4
 run_test "test/char_operations_and_print_test.c" 0 "abcdefghij"
 run_test "test/char_array_initialization.c" 0 "helloworld!"
 
+run_test "test/test_struct_1_expect_10.c" 10
+run_test "test/test_struct_2_expect_5.c" 5
+
 # Complex problems.
 run_test "coding_problems/8_queen.c" 92
 run_test "coding_problems/trading_stocks.c" 13

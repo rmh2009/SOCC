@@ -1,5 +1,28 @@
 open Type
 open Typeutil
+module VarMap = Map.Make (String)
+
+type struct_info_t = {
+  total_size : int;
+  (* name, type and offset of a member. *)
+  members : (string * data_type_t * int) VarMap.t;
+}
+
+type var_map_t = {
+  (* (offset, data_type_t, global_data_label), if the global_data_label exists it means
+   * this references a global data, offset should be ignored. *)
+  vars : (int * data_type_t * string option) VarMap.t;
+  cur_scope_vars : (int * data_type_t * string option) VarMap.t;
+  (* Global type definitions such as struct *)
+  type_defs : struct_info_t VarMap.t;
+  (* index is the current offset of (%esp - %ebp), this is used to statically associate a new
+   * variable to its address, which is offset to frame base %ebp. *)
+  index : int;
+  break_label : string;
+  continue_label : string;
+  function_return_label : string;
+  static_data : (string * static_data_t) list; (* label and data list *)
+}
 
 type register_t = BP | SP | AX | BX | CX | DX
 
@@ -76,7 +99,9 @@ module type CodeGenUtil_t = sig
 
   val fun_arg_registers_64 : string list
 
-  val get_data_size : data_type_t -> int
+  val get_data_size : var_map_t -> data_type_t -> int
+
+  val get_struct_info : var_map_t -> data_type_t -> struct_info_t
 
   val gen_command : command_t -> data_type_t -> string
 
@@ -94,21 +119,54 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
 
   let fun_arg_registers_64 = [ "%rdi"; "%rsi"; "%rdx"; "%rcx"; "%r8"; "r9" ]
 
-  let rec get_data_size (t : data_type_t) : int =
+  let pointer_size = if is_64_bit then 8 else 4
+
+  (* Returns the data size. Var_map is used to lookup type definitions in context,
+   * such as struct definitions. *)
+  let rec get_data_size (var_map : var_map_t) (t : data_type_t) : int =
     match t with
     | IntType -> 4
-    | ArrayType (t2, size) -> size * get_data_size t2
-    | PointerType _ -> if is_64_bit then 8 else 4
+    | ArrayType (t2, size) -> size * get_data_size var_map t2
+    | PointerType _ -> pointer_size
+    | StructType (a, _) -> (
+        match VarMap.find_opt a var_map.type_defs with
+        | Some struct_info -> struct_info.total_size
+        | None -> "Struct definition not found: " ^ a |> fail_genutil )
     | CharType -> 1
     | _ -> CodeGenUtilError "Unsupported data type." |> raise
+
+  and get_struct_info (var_map: var_map_t) (t : data_type_t) : struct_info_t =
+    let rec get_struct_info_helper sinfo (members : (string * data_type_t) list)
+        =
+      match members with
+      | (name, dtype) :: r ->
+          let size = get_data_size var_map dtype in
+          let size_aligned = Util.make_aligned_number sinfo.total_size size in
+          let new_total_size = size_aligned + size in
+          get_struct_info_helper
+            {
+              total_size = new_total_size;
+              members =
+                VarMap.add name (name, dtype, size_aligned) sinfo.members;
+            }
+            r
+      | [] -> sinfo
+    in
+    match t with
+    | StructType (struct_name, members) ->
+        get_struct_info_helper
+          { total_size = 0; members = VarMap.empty }
+          members
+    | a -> fail_genutil "Expecting struct type in get_struct_info."
 
   (* This is the footprint when evaluated after expression, i.e. saved in register. *)
   let rec get_exp_data_size (t : data_type_t) : int =
     match t with
     | IntType -> 4
-    | ArrayType (t2, size) -> if is_64_bit then 8 else 4
-    | PointerType _ -> if is_64_bit then 8 else 4
+    | ArrayType (t2, size) -> pointer_size
+    | PointerType _ -> pointer_size
     | CharType -> 1
+    | StructType (_, _) -> pointer_size
     | _ -> CodeGenUtilError "Unsupported data type." |> raise
 
   let gen_register (r : register_t) (dtype : data_type_t) =
@@ -178,7 +236,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | Mul (a, b) -> gen_two "imul" a b
     | Div a -> gen_one "idiv" a
     | Lea (a, b) -> gen_two "lea" a b
-    | Xor (a,b) -> gen_two "xor" a b
+    | Xor (a, b) -> gen_two "xor" a b
     | Neg a -> gen_one "neg" a
     | Not a -> gen_one "not" a
     | Inc a -> gen_one "inc" a
@@ -208,8 +266,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
       ^ ("    leal   " ^ label ^ "-" ^ temp_label ^ "(%ecx), %ecx\n")
       ^ "    subl    $4, %esp # padding \n"
       ^ ("    pushl    $" ^ string_of_int len ^ "\n")
-      ^ "    pushl    %ecx\n" ^ "    pushl    %eax\n"
-      ^ "    call    _memcpy\n"
+      ^ "    pushl    %ecx\n" ^ "    pushl    %eax\n" ^ "    call    _memcpy\n"
       ^ "    addl     $16, %esp\n" ^ "# ------- end memcpy ----------\n"
 
   let gen_data_section (datas : (string * static_data_t) list) : string =

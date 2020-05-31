@@ -219,7 +219,7 @@ and print_ast (ast : program_t) : string =
   let print_global spaces g =
     match g with
     | GlobalFunction f -> print_function spaces f
-    | GlobalDef data_type -> print_data_type data_type
+    | GlobalDef data_type -> " GlobalDef: " ^ print_data_type data_type
   in
   match ast with
   | Program fns ->

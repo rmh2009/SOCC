@@ -38,6 +38,12 @@ let parse_data_type (tokens : token_t list) :
 let is_type_array (data_type : data_type_t) =
   match data_type with ArrayType (_, _) -> true | _ -> false
 
+(* If an array's element is of this type, should we return address in ArrayIndexExp? *)
+let should_array_element_be_address (data_type : data_type_t) =
+  match data_type with
+  | ArrayType(_,_) | StructType(_,_) -> true
+  | _ -> false
+
 let is_type_pointer (data_type : data_type_t) =
   match data_type with PointerType _ -> true | _ -> false
 

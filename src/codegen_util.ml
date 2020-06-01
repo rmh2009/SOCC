@@ -272,7 +272,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
       ^ "    addl     $16, %esp\n" ^ "# ------- end memcpy ----------\n"
 
   let gen_data_section (datas : (string * static_data_t) list) : string =
-    let header = ".section    __TEXT,__const\n.p2align        4 \n" in
+    let header = "\n\n.section    __TEXT,__const\n.p2align        4 \n" in
     let body =
       List.fold_left
         (fun acc data ->
@@ -293,7 +293,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
   let align_esp_to_16 () : string =
     if is_32_bit then
       "    movl    %esp, %eax\n"
-      ^ ("   subl $" ^ string_of_int 4 ^ ", %eax\n")
+      ^ ("    subl $" ^ string_of_int 4 ^ ", %eax\n")
       ^ "    xorl %edx, %edx\n    movl $0x20, %ecx\n    idivl %ecx\n"
       ^ "    subl %edx, %esp\n    pushl %edx\n"
     else

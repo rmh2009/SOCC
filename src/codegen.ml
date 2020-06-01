@@ -69,20 +69,22 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
            (PointerType VoidType)) )
 
   let remove_function_call_padding (ctx : context_t) num_args : unit =
-    ctx.output "#---------- remove function call align -----\n";
     let padding = get_function_call_padding num_args in
     if CG.is_32_bit then
       if padding = 0 && num_args = 0 then ()
-      else
+      else (
+        ctx.output "#---------- remove function call align -----\n";
         ctx.output
           (Printf.sprintf "    addl    $%d,%%esp\n" (padding + (4 * num_args)))
+        )
     else
       let args_on_stack = if num_args > 6 then num_args - 6 else 0 in
       if padding = 0 && args_on_stack = 0 then ()
-      else
+      else (
+        ctx.output "#---------- remove function call align -----\n";
         ctx.output
           (Printf.sprintf "    addq    $%d,%%rsp\n"
-             (padding + (8 * args_on_stack)))
+             (padding + (8 * args_on_stack))) )
 
   (* Generate code for calling a function. This includes adding padding for
    * alignment, pushing parameters, remove padding afterwards, etc.*)
@@ -114,7 +116,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     let rec helper var_map fname exps registers num_args =
       match exps with
       | [] ->
-          ctx.output ("call    _" ^ fname ^ "\n");
+          ctx.output ("    call    _" ^ fname ^ "\n");
           (* Remove the padding *)
           remove_function_call_padding ctx num_args
       | a :: r -> (
@@ -327,7 +329,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Comp (Imm 0, Reg AX)) t;
         gen_command (Mov (Imm 0, Reg AX)) IntType;
         (* zero %ax completely. *)
-        output "sete   %al\n";
+        output "    sete   %al\n";
         t
     | ComplementOp exp ->
         let t = generate_expression ctx var_map exp in
@@ -398,17 +400,17 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Div (Reg CX)) t1;
         t1
     | EqualExp (exp1, exp2) ->
-        generate_relational_expression output "sete" exp1 exp2
+        generate_relational_expression output "    sete" exp1 exp2
     | NotEqualExp (exp1, exp2) ->
-        generate_relational_expression output "setne" exp1 exp2
+        generate_relational_expression output "    setne" exp1 exp2
     | GreaterOrEqualExp (exp1, exp2) ->
-        generate_relational_expression output "setge" exp1 exp2
+        generate_relational_expression output "    setge" exp1 exp2
     | GreaterExp (exp1, exp2) ->
-        generate_relational_expression output "setg" exp1 exp2
+        generate_relational_expression output "    setg" exp1 exp2
     | LessOrEqualExp (exp1, exp2) ->
-        generate_relational_expression output "setle" exp1 exp2
+        generate_relational_expression output "    setle" exp1 exp2
     | LessExp (exp1, exp2) ->
-        generate_relational_expression output "setl" exp1 exp2
+        generate_relational_expression output "    setl" exp1 exp2
     | OrExp (exp1, exp2) ->
         let t1 = generate_expression ctx var_map exp1 in
         let clause_label = get_unique_label "_clause2" in
@@ -423,7 +425,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Comp (Imm 0, Reg AX)) t2;
         gen_command (Mov (Imm 0, Reg AX)) IntType;
         (* always output int *)
-        output "setne    %al\n";
+        output "    setne    %al\n";
         output (end_label ^ ":\n");
         IntType
     | AndExp (exp1, exp2) ->
@@ -440,7 +442,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Comp (Imm 0, Reg AX)) t2;
         gen_command (Mov (Imm 0, Reg AX)) IntType;
         (* always output int *)
-        output "setne    %al\n";
+        output "    setne    %al\n";
         output (end_label ^ ":\n");
         IntType
     | ConditionExp (exp1, exp2, exp3) ->
@@ -803,7 +805,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         match items_opt with
         | None -> var_map
         | Some items ->
-            output ("_" ^ fname ^ ":\n");
+            output ("\n\n_" ^ fname ^ ":\n");
 
             (* Function prologue *)
             if not CG.is_64_bit then

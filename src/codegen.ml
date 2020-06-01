@@ -49,42 +49,40 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     if ctx.get_min_index () > new_index then ctx.set_min_index new_index else ();
     (new_index, "", { vars with index = new_index })
 
-  (* TODO This can now be removed since we always make a function stack 16 byte aligned.
-   * We might still need to do only a one-time alignment in the main function. *)
-  (* Hacky solution per Nora's article to add padding so that function stack is 16
-   * byte aligned. This is for MacOs only. *)
+  let get_function_call_padding num_args : int =
+    let res =
+      if CG.is_32_bit then num_args * 4 mod 16
+      else
+        let args_on_stack = if num_args > 6 then num_args - 6 else 0 in
+        args_on_stack * 8 mod 16
+    in
+    if res = 0 then 0 else 16 - res
+
   let add_function_call_padding (ctx : context_t) (num_args : int) : unit =
-    ctx.output "#---------- function call align begin -----\n";
-    if CG.is_32_bit then (
-      ctx.output
-        (Printf.sprintf "#---------- %d args on stack -----\n" num_args);
-      ctx.output "    movl    %esp, %eax\n";
-      (* TODO assumed that function param is always int *)
-      ctx.output ("    subl $" ^ string_of_int (4 * (num_args + 1)) ^ ", %eax\n");
-      ctx.output "    xorl %edx, %edx\n    movl $0x20, %ecx\n    idivl %ecx\n";
-      ctx.output "    subl %edx, %esp\n    pushl %edx\n" )
+    let padding = get_function_call_padding num_args in
+    if padding = 0 then ()
     else (
-      (* 64 bit *)
-      ctx.output "    movq   %rsp, %rax\n";
-      (* TODO assumed that function param is always 8 bytes *)
-      let args_on_stack = if num_args > 6 then num_args - 6 else 0 in
+      ctx.output "#---------- Add function call align -----\n";
       ctx.output
-        (Printf.sprintf "#---------- %d args on stack -----\n" args_on_stack);
-      ctx.output
-        ("    subq $" ^ string_of_int (8 * (args_on_stack + 1)) ^ ", %rax\n");
-      ctx.output "    xorq %rdx, %rdx\n    movq $0x20, %rcx\n    idivq %rcx\n";
-      ctx.output "    subq %rdx, %rsp\n    pushq %rdx\n" );
-    ctx.output "#---------- function call align end -----\n"
+        (CG.gen_command
+           (Sub (Imm (get_function_call_padding num_args), Reg SP))
+           (PointerType VoidType)) )
 
   let remove_function_call_padding (ctx : context_t) num_args : unit =
     ctx.output "#---------- remove function call align -----\n";
-    if CG.is_32_bit then (
-      ctx.output ("    addl    $" ^ string_of_int (4 * num_args) ^ ", %esp\n");
-      ctx.output "    popl %edx\n    addl %edx, %esp\n" )
-    else (
-      if num_args > 6 then
-        fail "Does not support more than 6 params in 64 bit mode yet.";
-      ctx.output "    popq %rdx\n    addq %rdx, %rsp\n" )
+    let padding = get_function_call_padding num_args in
+    if CG.is_32_bit then
+      if padding = 0 && num_args = 0 then ()
+      else
+        ctx.output
+          (Printf.sprintf "    addl    $%d,%%esp\n" (padding + (4 * num_args)))
+    else
+      let args_on_stack = if num_args > 6 then num_args - 6 else 0 in
+      if padding = 0 && args_on_stack = 0 then ()
+      else
+        ctx.output
+          (Printf.sprintf "    addq    $%d,%%rsp\n"
+             (padding + (8 * args_on_stack)))
 
   (* Generate code for calling a function. This includes adding padding for
    * alignment, pushing parameters, remove padding afterwards, etc.*)
@@ -265,7 +263,6 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             "Expecting struct type in StructMemberExp, actual type: "
             ^ Debug.print_data_type t
             |> fail )
-
     | ArrowStructMemberExp (_, _) ->
         fail "Array operator -> on pointer to struct is not implemented yet!"
     | DereferenceExp exp -> (
@@ -478,7 +475,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
         output "# array assign addr above\n";
         match t with
-        | ArrayType (element_type, size) | PointerType (ArrayType(element_type, size)) ->
+        | ArrayType (element_type, size)
+        | PointerType (ArrayType (element_type, size)) ->
             if is_type_array element_type then
               fail "Only 1-D array is assignable."
             else
@@ -529,7 +527,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         match t with
         | StructType (name, _) -> (
             let struct_info = VarMap.find name var_map.type_defs in
-            let _, dtype, member_offset = VarMap.find member struct_info.members in
+            let _, dtype, member_offset =
+              VarMap.find member struct_info.members
+            in
             match dtype with
             | ArrayType (_, _) | StructType (_, _) ->
                 "Struct member is not assignable!" ^ Debug.print_data_type dtype
@@ -810,6 +810,19 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               output "    push    %ebp\n    movl    %esp, %ebp\n"
             else output "    push    %rbp\n    movq    %rsp, %rbp\n";
 
+            (* Align main function start so that esp/rsp mod 16 is 8. This makes main consistent
+             * with other general functions, so that stack_allocation logic will make every stack
+             * aligned correctly. *)
+            if fname = "main" then (
+              output
+                "#---------------- (main only) align esp to 16 bytes --------\n";
+              output (CG.align_esp_to_16 ());
+              if not CG.is_64_bit then (
+                output
+                  "#---------- (main only) add extra so that esp % 16 is 8--\n";
+                output "    subl    $8, %esp #\n" ) )
+            else ();
+
             (* Reset the index at the function beginning. *)
             ctx.set_min_index 0;
             (* This is a little hacky, we need to generate the output then get the stack size,
@@ -840,22 +853,22 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
             let pvoid = PointerType VoidType in
             let two_additional_push = 2 * CG.get_data_size var_map pvoid in
             let total_stack_size =
-              -two_additional_push + ctx_new.get_min_index () 
+              -two_additional_push + ctx_new.get_min_index ()
             in
-            let stack_allocated = (make_aligned_number total_stack_size 16) + two_additional_push
+            let stack_allocated =
+              make_aligned_number total_stack_size 16 + two_additional_push
             in
             gen_command
-              (Add ( Imm stack_allocated, Reg SP )) (PointerType VoidType);
+              (Add (Imm stack_allocated, Reg SP))
+              (PointerType VoidType);
             output "#---------- function body    ----------\n";
             output (Buffer.contents fun_buf);
             (* Return label, for early returns. *)
             output (return_label ^ ":\n");
 
             output "#---------- stack deallocation --------\n";
-            gen_command
-              (Add (Imm (-stack_allocated), Reg SP))
-              (PointerType VoidType);
-
+            (* Restore esp and ebp. Since we can just use ebp to restore esp, all
+             * the special allocations can be handled automatically. *)
             (* Function epilog *)
             if not CG.is_64_bit then
               output "    movl    %ebp, %esp\n    pop    %ebp\n"

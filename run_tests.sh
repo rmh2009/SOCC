@@ -215,7 +215,6 @@ if [ $MODE_ALL_TEST = 1 ]; then
   compile_compiler
   run_all_tests
 
-
   exit 0
 fi
 

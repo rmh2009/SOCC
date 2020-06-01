@@ -108,6 +108,8 @@ module type CodeGenUtil_t = sig
   val call_memcpy : register_t -> string -> int -> string
 
   val gen_data_section : (string * static_data_t) list -> string
+
+  val align_esp_to_16 : unit -> string
 end
 
 module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
@@ -135,7 +137,7 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | CharType -> 1
     | _ -> CodeGenUtilError "Unsupported data type." |> raise
 
-  and get_struct_info (var_map: var_map_t) (t : data_type_t) : struct_info_t =
+  and get_struct_info (var_map : var_map_t) (t : data_type_t) : struct_info_t =
     let rec get_struct_info_helper sinfo (members : (string * data_type_t) list)
         =
       match members with
@@ -285,4 +287,24 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
         "" datas
     in
     header ^ body
+
+  (* Dynamically align the esp/rsp to 16 bytes. This is only needed once in
+     the beginning of main function. *)
+  let align_esp_to_16 () : string =
+    if is_32_bit then
+      "    movl    %esp, %eax\n"
+      ^ ("   subl $" ^ string_of_int 4 ^ ", %eax\n")
+      ^ "    xorl %edx, %edx\n    movl $0x20, %ecx\n    idivl %ecx\n"
+      ^ "    subl %edx, %esp\n    pushl %edx\n"
+    else
+      "    movq   %rsp, %rax\n"
+      ^ ("    subq $" ^ string_of_int 8 ^ ", %rax\n")
+      ^ "    xorq %rdx, %rdx\n    movq $0x20, %rcx\n    idivq %rcx\n"
+      ^ "    subq %rdx, %rsp\n    pushq %rdx\n"
+
+  (* This is technically not required, as we retore esp/rsp from ebp/rbp at function
+     * end. Keep it here for reference only. This is not exported. *)
+  let remove_align_esp_to_16 () : string =
+    if is_32_bit then "    popl %edx\n    addl %edx, %esp\n"
+    else "    popq %rdx\n    addq %rdx, %rsp\n"
 end

@@ -192,6 +192,8 @@ run_all_tests() {
   # Complex problems.
   run_test "coding_problems/8_queen.c" 92
   run_test "coding_problems/trading_stocks.c" 13
+  run_test "coding_problems/find_minimum_window_size_with_three_chars.c" 4
+  run_test "coding_problems/container_with_most_water.c" 48
 
   passedcount=$(($testcount - $failedcount))
   echo "Passed tests: $passedcount/$testcount"

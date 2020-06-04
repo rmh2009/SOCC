@@ -248,10 +248,10 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               ( "Target is not array type: "
               ^ Debug.print_expression 0 exp1
               ^ ", actual type: " ^ Debug.print_data_type t ) )
-    | StructMemberExp (exp, member) -> (
+    | StructMemberExp (exp, member) | ArrowStructMemberExp (exp, member) -> (
         let t = generate_expression ctx var_map exp in
         match t with
-        | StructType (name, _) -> (
+        | StructType (name, _) | PointerType (StructType (name, _)) -> (
             let struct_info = VarMap.find name var_map.type_defs in
             let _, dtype, offset = VarMap.find member struct_info.members in
             match dtype with
@@ -262,11 +262,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
                 gen_command (Mov (Disp (offset, AX), Reg AX)) dtype;
                 dtype )
         | _ ->
-            "Expecting struct type in StructMemberExp, actual type: "
-            ^ Debug.print_data_type t
+            "Expecting struct type in StructMemberExp or ArrowStructMemberExp, \
+             actual type: " ^ Debug.print_data_type t
             |> fail )
-    | ArrowStructMemberExp (_, _) ->
-        fail "Array operator -> on pointer to struct is not implemented yet!"
     | DereferenceExp exp -> (
         let t = generate_expression ctx var_map exp in
         if not (is_type_pointer t) then
@@ -280,7 +278,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         | None -> fail ("Variable " ^ a ^ " is undefined.")
         | Some (offset, t, _) -> (
             match t with
-            | IntType | ArrayType (_, _) | PointerType _ ->
+            | IntType | ArrayType (_, _) | PointerType _ | StructType (_, _) ->
                 gen_command (Lea (Disp (offset, BP), Reg AX)) pvoid;
                 PointerType t
             | _ -> fail "Illegal type in AddressOfExp." ) )
@@ -521,13 +519,14 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Disp (offset, BP), Reg CX)) pvoid;
         gen_command (Mov (Reg AX, RegV CX)) t2;
         t2
-    | AssignExp (StructMemberExp (exp, member), exp_r) -> (
+    | AssignExp (StructMemberExp (exp, member), exp_r)
+    | AssignExp (ArrowStructMemberExp (exp, member), exp_r) -> (
         let t = generate_expression ctx var_map exp in
         let offset, _, var_map =
           allocate_stack ctx var_map (CG.get_data_size var_map pvoid)
         in
         match t with
-        | StructType (name, _) -> (
+        | StructType (name, _) | PointerType (StructType (name, _)) -> (
             let struct_info = VarMap.find name var_map.type_defs in
             let _, dtype, member_offset =
               VarMap.find member struct_info.members

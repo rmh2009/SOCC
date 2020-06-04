@@ -188,6 +188,8 @@ run_all_tests() {
 
   run_test "test/test_struct_1_expect_10.c" 10
   run_test "test/test_struct_2_expect_5.c" 5
+  run_test "test/test_struct_pointer_arrow.c" 10
+  run_test "test/test_struct_nested_pointer_arrow.c" 10
 
   # Complex problems.
   run_test "coding_problems/8_queen.c" 92

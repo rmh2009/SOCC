@@ -8,13 +8,17 @@ type struct_info_t = {
   members : (string * data_type_t * int) VarMap.t;
 }
 
+type type_info_t =
+  | StructInfo of struct_info_t
+  | FunctionInfo of function_t
+
 type var_map_t = {
   (* (offset, data_type_t, global_data_label), if the global_data_label exists it means
    * this references a global data, offset should be ignored. *)
   vars : (int * data_type_t * string option) VarMap.t;
   cur_scope_vars : (int * data_type_t * string option) VarMap.t;
   (* Global type definitions such as struct *)
-  type_defs : struct_info_t VarMap.t;
+  type_defs : type_info_t VarMap.t;
   (* index is the current offset of (%esp - %ebp), this is used to statically associate a new
    * variable to its address, which is offset to frame base %ebp. *)
   index : int;
@@ -132,8 +136,8 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
     | PointerType _ -> pointer_size
     | StructType (a, _) -> (
         match VarMap.find_opt a var_map.type_defs with
-        | Some struct_info -> struct_info.total_size
-        | None -> "Struct definition not found: " ^ a |> fail_genutil )
+        | Some StructInfo(struct_info) -> struct_info.total_size
+        | _ -> "Struct definition not found: " ^ a |> fail_genutil )
     | CharType -> 1
     | _ -> CodeGenUtilError "Unsupported data type." |> raise
 

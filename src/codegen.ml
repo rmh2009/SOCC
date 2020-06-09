@@ -223,7 +223,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
          * the type of exp1, so we need to evaluate exp1 first.*)
         let t = generate_expression ctx var_map exp1 in
         match t with
-        | ArrayType (child_type, _) | PointerType (ArrayType (child_type, _)) ->
+        | ArrayType (child_type, _)
+        | PointerType (ArrayType (child_type, _))
+        | PointerType child_type ->
             let off, _, var_map =
               allocate_stack ctx var_map (CG.get_data_size var_map pvoid)
             in
@@ -252,7 +254,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         let t = generate_expression ctx var_map exp in
         match t with
         | StructType (name, _) | PointerType (StructType (name, _)) -> (
-            let struct_info = VarMap.find name var_map.type_defs in
+            let struct_info =
+              match VarMap.find name var_map.type_defs with
+              | StructInfo info -> info
+              | _ -> "Expecting struct info for name " ^ name |> fail
+            in
             let _, dtype, offset = VarMap.find member struct_info.members in
             match dtype with
             | ArrayType (_, _) | StructType (_, _) ->
@@ -316,8 +322,15 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     | FunctionCallExp (fname, exps) ->
         if CG.is_32_bit then generate_f_call ctx var_map fname exps
         else generate_f_call_64 ctx var_map fname exps;
-        (* TODO assume function always return int. *)
-        IntType
+        let return_type =
+          match VarMap.find_opt fname var_map.type_defs with
+          | Some (FunctionInfo (Function (fname, return_type, _, _))) ->
+              return_type
+          | _ ->
+              "Expecting function definition " ^ fname ^ " but found none."
+              |> fail
+        in
+        return_type
     | NegateOp exp ->
         let t = generate_expression ctx var_map exp in
         gen_command (Neg (Reg AX)) t;
@@ -475,8 +488,9 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Mov (Reg AX, Disp (offset, BP))) pvoid;
         output "# array assign addr above\n";
         match t with
-        | ArrayType (element_type, size)
-        | PointerType (ArrayType (element_type, size)) ->
+        | ArrayType (element_type, _)
+        | PointerType (ArrayType (element_type, _))
+        | PointerType element_type ->
             if is_type_array element_type then
               fail "Only 1-D array is assignable."
             else
@@ -527,7 +541,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         in
         match t with
         | StructType (name, _) | PointerType (StructType (name, _)) -> (
-            let struct_info = VarMap.find name var_map.type_defs in
+            let struct_info =
+              match VarMap.find name var_map.type_defs with
+              | StructInfo info -> info
+              | _ -> "Expecting struct info for name " ^ name |> fail
+            in
             let _, dtype, member_offset =
               VarMap.find member struct_info.members
             in
@@ -800,7 +818,17 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     let gen_command a b = CG.gen_command a b |> output in
 
     match g with
-    | GlobalFunction (IntFunction (fname, params, items_opt)) -> (
+    | GlobalFunction (Function (fname, return_type, params, items_opt)) -> (
+        (* Add this function definition into context so that it can call itself. *)
+        let var_map =
+          {
+            var_map with
+            type_defs =
+              VarMap.add fname
+                (FunctionInfo (Function (fname, return_type, params, None)))
+                var_map.type_defs;
+          }
+        in
         match items_opt with
         | None -> var_map
         | Some items ->
@@ -884,7 +912,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
               var_map with
               type_defs =
                 VarMap.add a
-                  (CG.get_struct_info var_map data_type)
+                  (StructInfo (CG.get_struct_info var_map data_type))
                   var_map.type_defs;
             }
         | a ->

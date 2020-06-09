@@ -191,6 +191,9 @@ run_all_tests() {
   run_test "test/test_struct_pointer_arrow.c" 10
   run_test "test/test_struct_nested_pointer_arrow.c" 10
 
+  run_test "test/test_malloc_and_free_expect_10.c" 10
+  run_test "test/test_malloc_and_free2_expect_45.c" 45
+
   # Complex problems.
   run_test "coding_problems/8_queen.c" 92
   run_test "coding_problems/trading_stocks.c" 13
@@ -199,7 +202,7 @@ run_all_tests() {
 
   passedcount=$(($testcount - $failedcount))
   echo "Passed tests: $passedcount/$testcount"
-  if [ -z $failed_tests ]; then
+  if [ -z "$failed_tests" ]; then
     echo "All tests passed!"
   else
     echo "Failed tests: $failed_tests"

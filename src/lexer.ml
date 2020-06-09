@@ -47,6 +47,7 @@ let parse_tokens (content : string) : token_t list =
     else if word = "return" then (ReturnKeyword, loc)
     else if word = "float" then (FloatKeyword, loc)
     else if word = "double" then (DoubleKeyword, loc)
+    else if word = "void" then (VoidKeyword, loc)
     else if word = "if" then (IfKeyword, loc)
     else if word = "else" then (ElseKeyword, loc)
     else if word = "for" then (ForKeyword, loc)

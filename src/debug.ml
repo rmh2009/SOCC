@@ -54,6 +54,7 @@ let print_token (token : token_t) : string =
   | FloatKeyword -> "Float"
   | DoubleKeyword -> "Double"
   | StructKeyword -> "Struct"
+  | VoidKeyword -> "Void"
   | Dot -> "Dot."
   | Arrow -> "Arrow->"
 
@@ -89,9 +90,15 @@ let rec print_expression spaces exp =
   | ArrayIndexExp (arr, index) ->
       print_space "ArrayIndex:\n" ^ print_exp arr ^ print_exp index
   | StructMemberExp (exp, member) ->
-      print_space "StructMember \n" ^ print_exp exp ^ print_space (" ." ^ member) ^ "\n"
+      print_space "StructMember \n"
+      ^ print_exp exp
+      ^ print_space (" ." ^ member)
+      ^ "\n"
   | ArrowStructMemberExp (exp, member) ->
-      print_space "ArrowStructMember \n" ^ print_exp exp ^ print_space (" ->" ^ member) ^ "\n"
+      print_space "ArrowStructMember \n"
+      ^ print_exp exp
+      ^ print_space (" ->" ^ member)
+      ^ "\n"
   | DereferenceExp exp -> print_space "PointerDereference:\n" ^ print_exp exp
   | AddressOfExp exp -> print_space "AddressOf:\n" ^ print_exp exp
   | ConstantIntExp n ->
@@ -211,9 +218,10 @@ and print_ast (ast : program_t) : string =
             "" statements
     in
     match f with
-    | IntFunction (a, params, sts) ->
-        String.make spaces ' ' ^ "Function " ^ a ^ ": , Params: "
-        ^ print_params params ^ "\n"
+    | Function (a, return_type, params, sts) ->
+        String.make spaces ' ' ^ "Function " ^ a ^ ": "
+        ^ print_data_type return_type
+        ^ ", Params: " ^ print_params params ^ "\n"
         ^ print_statements (spaces + 1) sts
   in
   let print_global spaces g =

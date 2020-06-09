@@ -9,6 +9,7 @@ type token_t =
   | CharKeyword
   | FloatKeyword
   | DoubleKeyword
+  | VoidKeyword
   | LeftParentheses
   | RightParentheses
   | LeftBrace

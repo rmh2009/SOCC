@@ -361,17 +361,26 @@ and parse_function (tokens : token_t list) : function_t * token_t list =
   in
   match tokens with
   | [] -> fail "Empty function."
-  | IntKeyword :: Identifier fname :: LeftParentheses :: r ->
-      let params, r = parse_parameters [] r in
-      let r = consume_token RightParentheses r in
-      if peek r = Semicolon then
-        let r = consume_token Semicolon r in
-        (IntFunction (fname, params, None), r)
-      else
-        let r = consume_token LeftBrace r in
-        let statements, r = parse_block_items [] r in
-        (IntFunction (fname, params, Some statements), r)
-  | a :: r -> fail ("Unexpected token in parse_function: " ^ Debug.print_token a)
+  | tokens -> (
+      let fname, return_type, remain = parse_data_type tokens in
+      match remain with
+      | LeftParentheses :: r ->
+          let params, r = parse_parameters [] r in
+          let r = consume_token RightParentheses r in
+          if peek r = Semicolon then
+            let r = consume_token Semicolon r in
+            (Function (fname, return_type, params, None), r)
+          else
+            let r = consume_token LeftBrace r in
+            let statements, r = parse_block_items [] r in
+            (Function (fname, return_type, params, Some statements), r)
+      | a :: _ ->
+          "Expecing LeftParentheses in parse function, saw "
+          ^ Debug.print_token a
+          |> fail
+      | [] ->
+          fail "Expecing LeftParentheses in parse function, saw no token left."
+      )
 
 let parse_struct_definition (tokens : token_t list) : data_type_t * token_t list
     =
@@ -402,13 +411,12 @@ let rec parse_globals (acc : global_item_t list) (tokens : token_t list) :
     global_item_t list * token_t list =
   match tokens with
   | [] -> (List.rev acc, tokens)
-  | IntKeyword :: Identifier _ :: LeftParentheses :: r ->
-      let f, r = parse_function tokens in
-      parse_globals (GlobalFunction f :: acc) r
   | StructKeyword :: r ->
       let struct_type, r = parse_struct_definition tokens in
       parse_globals (GlobalDef struct_type :: acc) r
-  | _ -> fail "Invalid tokens in parse_globals."
+  | _ ->
+      let f, r = parse_function tokens in
+      parse_globals (GlobalFunction f :: acc) r
 
 (* Parses tokens to get a program, returns the program and possibly remaining tokens. *)
 let parse_program (tokens : token_t list) : program_t * token_t list =

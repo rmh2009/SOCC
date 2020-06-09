@@ -107,10 +107,10 @@ let rec print_expression spaces exp =
   | ConstantFloatExp n ->
       print_space "FloatExpression: " ^ string_of_float n ^ "\n"
   | ConstantStringExp n -> print_space "StringExpression: " ^ n ^ "\n"
-  | PreIncExp exp -> print_space "PreInc : " ^ print_exp exp
-  | PostIncExp exp -> print_space "PostInc : " ^ print_exp exp
-  | PreDecExp exp -> print_space "PreDec : " ^ print_exp exp
-  | PostDecExp exp -> print_space "PostDec : " ^ print_exp exp
+  | PreIncExp exp -> print_space "PreInc : \n" ^ print_exp exp
+  | PostIncExp exp -> print_space "PostInc : \n" ^ print_exp exp
+  | PreDecExp exp -> print_space "PreDec : \n" ^ print_exp exp
+  | PostDecExp exp -> print_space "PostDec : \n" ^ print_exp exp
   | NegateOp exp -> print_space "NegateOp:\n" ^ print_exp exp
   | LogicalNegateOp exp -> print_space "LogicalNegateOp:\n" ^ print_exp exp
   | ComplementOp exp -> print_space "ComplementOp:\n" ^ print_exp exp

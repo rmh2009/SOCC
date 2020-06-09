@@ -22,12 +22,14 @@ Implemented features:
  - A simple type checking system. (see note1)
  - Support for pointer. (see note2)
  - Supports both 32 bit and 64 bit x86 assembly (see note4).
- - Support for char and char array initialization. (see note5)
+ - Char type and char array initialization. (see note5)
  - Support for struct. (see note6)
+ - Malloc and free.
 
 Some features missing:
  - Support for float/double.
  - Macros
+ - #include command.
  - And more...
 
 Initially I read Nora's article (see the reference) on how to write a C compiler, but at the time the article stopped at implementing function calls (As of May 2020).

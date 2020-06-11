@@ -25,10 +25,14 @@ int printnode(struct Node* node) {
   printf(format, node->num);
   if (node->left != 0) {
     printnode(node->left);
+  } else {
+    putchar('#');
   }
   putchar(',');
   if (node->right != 0) {
     printnode(node->right);
+  } else {
+    putchar('#');
   }
   putchar(')');
   return 0;
@@ -42,5 +46,6 @@ int main() {
   printnode(node);
   putchar(10);
 
+  // Expect stdout: (0,(1,(3,#,#),#),(2,#,#))
   return 0;
 }

@@ -411,7 +411,7 @@ let rec parse_globals (acc : global_item_t list) (tokens : token_t list) :
     global_item_t list * token_t list =
   match tokens with
   | [] -> (List.rev acc, tokens)
-  | StructKeyword :: r ->
+  | StructKeyword :: Identifier (_) :: LeftBrace :: _ ->
       let struct_type, r = parse_struct_definition tokens in
       parse_globals (GlobalDef struct_type :: acc) r
   | _ ->

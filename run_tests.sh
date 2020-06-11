@@ -52,7 +52,8 @@ compile_compiler() {
   fi
 
   echo $PWD
-  ocamlopt -o cc_ocaml $OCAML_DEPS ../src/"$ocaml_main_file"
+  # ocamlopt -o cc_ocaml $OCAML_DEPS ../src/"$ocaml_main_file"
+  ocamlc -g -o cc_ocaml $OCAML_DEPS ../src/"$ocaml_main_file"
 
   ret=$?
   if [[ $ret -ne 0 ]]; then
@@ -199,6 +200,7 @@ run_all_tests() {
   run_test "coding_problems/trading_stocks.c" 13
   run_test "coding_problems/find_minimum_window_size_with_three_chars.c" 4
   run_test "coding_problems/container_with_most_water.c" 48
+  run_test "coding_problems/inorder_print_binary_tree.c" 0 "(0,(1,(3,,),),(2,,))"
 
   passedcount=$(($testcount - $failedcount))
   echo "Passed tests: $passedcount/$testcount"

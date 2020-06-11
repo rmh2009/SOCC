@@ -255,11 +255,17 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         match t with
         | StructType (name, _) | PointerType (StructType (name, _)) -> (
             let struct_info =
-              match VarMap.find name var_map.type_defs with
-              | StructInfo info -> info
+              match VarMap.find_opt name var_map.type_defs with
+              | Some (StructInfo info) -> info
               | _ -> "Expecting struct info for name " ^ name |> fail
             in
-            let _, dtype, offset = VarMap.find member struct_info.members in
+            let dtype, offset =
+              match VarMap.find_opt member struct_info.members with
+              | Some (_, dtype, offset) -> (dtype, offset)
+              | _ ->
+                  "Failed to find member " ^ member ^ " in struct " ^ name
+                  |> fail
+            in
             match dtype with
             | ArrayType (_, _) | StructType (_, _) ->
                 gen_command (Lea (Disp (offset, AX), Reg AX)) pvoid;
@@ -542,8 +548,8 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         match t with
         | StructType (name, _) | PointerType (StructType (name, _)) -> (
             let struct_info =
-              match VarMap.find name var_map.type_defs with
-              | StructInfo info -> info
+              match VarMap.find_opt name var_map.type_defs with
+              | Some (StructInfo info) -> info
               | _ -> "Expecting struct info for name " ^ name |> fail
             in
             let _, dtype, member_offset =

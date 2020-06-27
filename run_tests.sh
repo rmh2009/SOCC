@@ -190,6 +190,7 @@ run_all_tests() {
 
   run_test "test/char_operations_and_print_test.c" 0 "abcdefghij"
   run_test "test/char_array_initialization.c" 0 "helloworld!"
+  run_test "test/char_string_literal_expect_0.c" 0 "test 123"
 
   run_test "test/test_struct_1_expect_10.c" 10
   run_test "test/test_struct_2_expect_5.c" 5

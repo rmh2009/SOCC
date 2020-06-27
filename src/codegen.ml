@@ -31,6 +31,8 @@ type context_t = {
    * call push and pop. *)
   set_min_index : int -> unit;
   get_min_index : unit -> int;
+  (* Add a string data, first param is the labe, second is the string. *)
+  add_string_data : string -> string -> unit;
 }
 
 module MakeCodeGen (CG : CodeGenUtil_t) = struct
@@ -323,7 +325,11 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         gen_command (Xor (Reg AX, Reg AX)) pvoid;
         gen_command (Mov (Imm (int_of_char a), Reg AX)) CharType;
         CharType
-    | ConstantStringExp a -> fail "String unimplemented"
+    | ConstantStringExp a ->
+        let label = ctx.get_unique_label "_data" in
+        output (CG.get_data_address label);
+        ctx.add_string_data label a;
+        PointerType CharType
     | ConstantFloatExp a -> fail "Float unimplemented"
     | FunctionCallExp (fname, exps) ->
         if CG.is_32_bit then generate_f_call ctx var_map fname exps
@@ -932,12 +938,18 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
     let count = ref 0 in
     (* minimum offset of %esp - %ebp *)
     let min_index = ref 0 in
+    let string_data = ref [] in
     let ctx =
       {
         output = Buffer.add_string buf;
         get_unique_label = get_unique_label count;
         set_min_index = (fun a -> min_index := a);
         get_min_index = (fun () -> !min_index);
+        (* This is sort of hack, we have a global stateful function that
+         * collects the string literals. *)
+        add_string_data =
+          (fun label data ->
+            string_data := (label, DataString data) :: !string_data);
       }
     in
     ctx.output ".globl _main\n";
@@ -946,6 +958,7 @@ module MakeCodeGen (CG : CodeGenUtil_t) = struct
         let accumulated_var_map =
           List.fold_left (generate_global ctx) default_var_map globals
         in
-        ctx.output (CG.gen_data_section accumulated_var_map.static_data);
+        ctx.output
+          (CG.gen_data_section (accumulated_var_map.static_data @ !string_data));
         Buffer.contents buf
 end

@@ -113,6 +113,8 @@ module type CodeGenUtil_t = sig
 
   val gen_data_section : (string * static_data_t) list -> string
 
+  val get_data_address : string -> string
+
   val align_esp_to_16 : unit -> string
 end
 
@@ -274,6 +276,18 @@ module MakeCodeGenUtil (System : System_t) : CodeGenUtil_t = struct
       ^ ("    pushl    $" ^ string_of_int len ^ "\n")
       ^ "    pushl    %ecx\n" ^ "    pushl    %eax\n" ^ "    call    _memcpy\n"
       ^ "    addl     $16, %esp\n" ^ "# ------- end memcpy ----------\n"
+
+  let get_data_address (label : string) : string =
+    if is_64_bit then
+      ( "# ------- data address ----------\n" ^ "    leaq    " ^ label
+      ^ "(%rip), %rax\n" )
+    else
+      let temp_label = "_label_for" ^ label in
+      (* Trick to get PIE address of label. Need to make sure that temp label is only used once. *)
+      "# ------- start memcpy ----------\n"
+      ^ ("    call    " ^ temp_label ^ "\n")
+      ^ (temp_label ^ ": pop    %ecx\n")
+      ^ ("    leal   " ^ label ^ "-" ^ temp_label ^ "(%ecx), %eax\n")
 
   let gen_data_section (datas : (string * static_data_t) list) : string =
     let header = "\n\n.section    __TEXT,__const\n.p2align        4 \n" in

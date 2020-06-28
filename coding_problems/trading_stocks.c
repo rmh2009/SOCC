@@ -28,7 +28,7 @@ int main() {
 
   int K = 3;
 
-  int maxprofit = -100000;
+  int max_profit = -100000;
 
   int profit[7][7];
 
@@ -39,7 +39,7 @@ int main() {
 
   for (int i = 1; i < 7; ++i) {
     int profit = calculate(i, 7, data, profit);
-    maxprofit = maxprofit < profit? profit : maxprofit;
+    max_profit = max_profit < profit? profit : max_profit;
   }
 
   for (int i = 0; i < 7; ++i ){
@@ -50,7 +50,7 @@ int main() {
   }
 
   // Expecting 13;
-  return maxprofit;
+  return max_profit;
 }
 
 

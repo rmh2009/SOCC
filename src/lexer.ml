@@ -27,8 +27,11 @@ let is_number (c : char) : bool = if c >= '0' && c <= '9' then true else false
 let is_alpha (c : char) : bool =
   if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') then true else false
 
+let is_underscore (c :char) : bool =
+  c = '_'
+
 let is_alphanumeric (c : char) : bool =
-  if is_alpha c || is_number c then true else false
+  if is_alpha c || is_number c || is_underscore c then true else false
 
 (* Parses a string content and get a list of tokens. *)
 let parse_tokens (content : string) : token_t list =

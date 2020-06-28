@@ -3,7 +3,6 @@
 
 // printf function from c standard library.
 int printf();
-int putchar(int a);
 
 // Returns the maximum profit at the end of an operation (either buy or sell).
 int calculate(int op, int cols, int data[6], int profit[7][7]) {
@@ -43,13 +42,11 @@ int main() {
     maxprofit = maxprofit < profit? profit : maxprofit;
   }
 
-  // Prints the temporary array.
-  char format[11] = "%d,";
   for (int i = 0; i < 7; ++i ){
     for (int j = 0; j < 7; ++j) {
-      printf(format, profit[i][j]);
+      printf("%d,", profit[i][j]);
     }
-    putchar(10);
+    printf("\n");
   }
 
   // Expecting 13;

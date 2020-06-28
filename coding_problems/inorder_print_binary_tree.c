@@ -2,7 +2,6 @@
 void* malloc(int size);
 void free(void* p);
 int printf();
-int putchar(int c);
 
 struct Node {
   int num;
@@ -19,22 +18,19 @@ struct Node* createnode(int num) {
 }
 
 int printnode(struct Node* node) {
-  char format[5] = "(%d,";
-  // hacky way to set the last char to 0.
-  format[4] = 0;
-  printf(format, node->num);
+  printf("(%d,", node->num);
   if (node->left != 0) {
     printnode(node->left);
   } else {
-    putchar('#');
+    printf("#");
   }
-  putchar(',');
+  printf(",");
   if (node->right != 0) {
     printnode(node->right);
   } else {
-    putchar('#');
+    printf("#");
   }
-  putchar(')');
+  printf(")");
   return 0;
 }
 
@@ -44,7 +40,7 @@ int main() {
   node->right = createnode(2);
   node->left->left = createnode(3);
   printnode(node);
-  putchar(10);
+  printf("\n");
 
   // Expect stdout: (0,(1,(3,#,#),#),(2,#,#))
   return 0;
